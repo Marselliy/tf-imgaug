@@ -1,3 +1,8 @@
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'src', 'tf_imgaug'))
+
 from sequential import Sequential
 from augments import *
 import numpy as np
@@ -75,7 +80,7 @@ ax[0].plot(bboxes[0, :, [0, 2, 2, 0, 0]], bboxes[0, :, [1, 1, 3, 3, 1]], c='b')
 ax[1].imshow(images_aug[0].astype(np.uint8))
 ax[1].scatter(keypoints_aug[0, :, 0], keypoints_aug[0, :, 1], marker='x', c='g')
 ax[1].plot(bboxes_aug[0, :, [0, 2, 2, 0, 0]], bboxes_aug[0, :, [1, 1, 3, 3, 1]], c='b')
-plt.savefig('1.png')
+plt.savefig('result.png')
 
 
 
