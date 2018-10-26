@@ -274,8 +274,6 @@ class SomeOf(AbstractAugment):
         self.children_augments = children_augments
 
     def __call__(self, *args, **kwargs):
-        results = [e(*args, **kwargs) for e in self.children_augments]
-
         probs = tf.random_uniform((len(self.children_augments),), seed=self.seed)
         values, indices = tf.nn.top_k(probs, tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self.seed))
         mask = tf.greater_equal(probs, tf.reduce_min(values))
