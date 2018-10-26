@@ -4,8 +4,9 @@ import random
 
 class AbstractAugment:
 
-    def __init__(self, seed=1337):
+    def __init__(self, seed=1337, separable=True):
         self.seed = seed
+        self.separable = separable
 
     def _set_seed(self, seed):
         self.seed = seed
@@ -20,23 +21,28 @@ class AbstractAugment:
     def _init_rng(self):
         pass
 
-    def __call__(self, images, keypoints=None, bboxes=None):
+    def __call__(self, images, keypoints, bboxes):
         res = list()
         self.last_shape = tf.shape(images)
-        self._init_rng()
 
-        res.append(self._augment_images(images))
+        def _aug(e):
+            self._init_rng()
+            return (
+                self._augment_images(e[0]), 
+                self._augment_keypoints(e[1]),
+                self._augment_bboxes(e[2])
+            )
 
-        if not keypoints is None:
-            res.append(self._augment_keypoints(keypoints))
-        if not bboxes is None:
-            res.append(self._augment_bboxes(bboxes))
+        if self.separable:
+            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
 
-        del self.last_shape
-
-        return tuple(res)
+        return _aug((images, keypoints, bboxes))
 
 class Noop(AbstractAugment):
+
+    def __init__(self):
+        super(Noop, self).__init__(separable=False)
 
     def _augment_images(self, images):
         return images
@@ -50,7 +56,7 @@ class Noop(AbstractAugment):
 class Translate(AbstractAugment):
 
     def __init__(self, translate_percent, interpolation='BILINEAR'):
-        super(Translate, self).__init__()
+        super(Translate, self).__init__(separable=False)
         self.translate_percent = translate_percent
         self.interpolation = interpolation
 
@@ -75,7 +81,7 @@ class Translate(AbstractAugment):
 class Rotate(AbstractAugment):
 
     def __init__(self, rotations, interpolation='BILINEAR'):
-        super(Rotate, self).__init__()
+        super(Rotate, self).__init__(separable=False)
         self.rotations = rotations
         self.interpolation = interpolation
 
@@ -186,7 +192,7 @@ class Fliplr(AbstractAugment):
     def _augment_images(self, images):
         return tf.cond(
             self.flip,
-            lambda: images[:, :, ::-1],
+            lambda: tf.image.flip_left_right(images),
             lambda: images
         )
 
@@ -218,7 +224,7 @@ class Flipud(AbstractAugment):
     def _augment_images(self, images):
         return tf.cond(
             self.flip,
-            lambda: images[:, ::-1],
+            lambda: tf.image.flip_up_down(images),
             lambda: images
         )
 
@@ -250,22 +256,31 @@ class Sometimes(AbstractAugment):
         random.seed(self.seed)
         self.true_augment._set_seed(random.randint(0, 2 ** 64))
         self.false_augment._set_seed(random.randint(0, 2 ** 64))
+        self.true_augment.separable = False
+        self.false_augment.separable = False
 
     def _init_rng(self):
         self.flag = tf.random_uniform((), seed=self.seed) < self.p
 
-    def __call__(self, *args, **kwargs):
-        self._init_rng()
-        return tf.cond(
-            self.flag,
-            lambda: self.true_augment(*args, **kwargs),
-            lambda: self.false_augment(*args, **kwargs)
-        )
+    def __call__(self, images, keypoints, bboxes):
+        def _aug(e):
+            self._init_rng()
+            return tf.cond(
+                self.flag,
+                lambda: self.true_augment(*e),
+                lambda: self.false_augment(*e)
+            )
+
+        if self.separable:
+            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+        else:
+            return _aug((images, keypoints, bboxes))
 
 class SomeOf(AbstractAugment):
 
     def __init__(self, num, children_augments):
-        super(SomeOf, self).__init__()
+        super(SomeOf, self).__init__(separable=True)
         if type(num) == int:
             self.min_num = num
             self.max_num = num
@@ -279,26 +294,36 @@ class SomeOf(AbstractAugment):
             else:
                 self.max_num = num[1]
         self.children_augments = children_augments
+        
+        for aug in self.children_augments:
+            aug.separable = False
 
     def _init_rng(self):
         self.probs = tf.random_uniform((len(self.children_augments),), seed=self.seed)
         self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self.seed)
 
-    def __call__(self, *args, **kwargs):
-        self._init_rng()
-        values, indices = tf.nn.top_k(self.probs, self.count)
-        mask = tf.greater_equal(self.probs, tf.reduce_min(values))
+    def __call__(self, images, keypoints, bboxes):
+        def _aug(e):
+            self._init_rng()
+            values, indices = tf.nn.top_k(self.probs, self.count)
+            mask = tf.greater_equal(self.probs, tf.reduce_min(values))
 
-        random.seed(self.seed)
-        result = Noop()(*args, **kwargs)
-        for i, augment in enumerate(self.children_augments):
-            augment._set_seed(random.randint(0, 2 ** 64))
-            result = tf.cond(
-                mask[i],
-                lambda: augment(*result),
-                lambda: result
-            )
-        return result
+            random.seed(self.seed)
+            result = Noop()(*e)
+            for i, augment in enumerate(self.children_augments):
+                augment._set_seed(random.randint(0, 2 ** 64))
+                result = tf.cond(
+                    mask[i],
+                    lambda: augment(*result),
+                    lambda: result
+                )
+            return result
+
+        if self.separable:
+            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+        else:
+            return _aug((images, keypoints, bboxes))
 
 class OneOf(SomeOf):
 
