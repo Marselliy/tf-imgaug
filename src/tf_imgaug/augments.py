@@ -17,9 +17,13 @@ class AbstractAugment:
     def _augment_bboxes(self, bboxes):
         return bboxes
 
+    def _init_rng(self):
+        pass
+
     def __call__(self, images, keypoints=None, bboxes=None):
         res = list()
         self.last_shape = tf.shape(images)
+        self._init_rng()
 
         res.append(self._augment_images(images))
 
@@ -50,26 +54,22 @@ class Translate(AbstractAugment):
         self.translate_percent = translate_percent
         self.interpolation = interpolation
 
-    def _gen_translations(self):
+    def _init_rng(self):
         translations = tf.random_uniform(tf.concat([self.last_shape[:1], [2]], axis=0), seed=self.seed)
         translations = translations * [[
             self.translate_percent['x'][1] - self.translate_percent['x'][0],
             self.translate_percent['y'][1] - self.translate_percent['y'][0]
         ]] + [[self.translate_percent['x'][0] + self.translate_percent['y'][0]]]
-        translations = translations * tf.expand_dims(tf.cast(self.last_shape[1:3], tf.float32), axis=0)
-        return translations
+        self.translations = translations * tf.expand_dims(tf.cast(self.last_shape[1:3], tf.float32), axis=0)
 
     def _augment_images(self, images):
-        translations = self._gen_translations()
-        return tf.contrib.image.translate(images, translations, self.interpolation)
+        return tf.contrib.image.translate(images, self.translations, self.interpolation)
 
     def _augment_keypoints(self, keypoints):
-        translations = self._gen_translations()
-        return keypoints + tf.expand_dims(translations, axis=1)
+        return keypoints + tf.expand_dims(self.translations, axis=1)
 
     def _augment_bboxes(self, bboxes):
-        translations = self._gen_translations()
-        return bboxes + tf.expand_dims(tf.tile(translations, [1, 2]), axis=1)
+        return bboxes + tf.expand_dims(tf.tile(self.translations, [1, 2]), axis=1)
 
 
 class Rotate(AbstractAugment):
@@ -79,17 +79,15 @@ class Rotate(AbstractAugment):
         self.rotations = rotations
         self.interpolation = interpolation
 
-    def _gen_angles(self):
+    def _init_rng(self):
         angles = tf.random_uniform(self.last_shape[:1], seed=self.seed)
-        angles = (angles * (self.rotations[1] - self.rotations[0]) + self.rotations[0]) * math.pi / 180
-        return angles
+        self.angles = (angles * (self.rotations[1] - self.rotations[0]) + self.rotations[0]) * math.pi / 180
 
     def _augment_images(self, images):
-        angles = self._gen_angles()
-        return tf.contrib.image.rotate(images, angles, self.interpolation)
+        return tf.contrib.image.rotate(images, self.angles, self.interpolation)
 
     def _augment_keypoints(self, keypoints):
-        angles = self._gen_angles()
+        angles = self.angles
         angles = tf.expand_dims(-angles, axis=1)
         shape = tf.cast(self.last_shape[1:3], tf.float32)
 
@@ -103,7 +101,7 @@ class Rotate(AbstractAugment):
         return keypoints
 
     def _augment_bboxes(self, bboxes):
-        angles = self._gen_angles()
+        angles = self.angles
         shape = tf.cast(self.last_shape[1:3], tf.float32)
         a = tf.cast((bboxes[..., 2] - bboxes[..., 0]) / 2, tf.float32)
         b = tf.cast((bboxes[..., 3] - bboxes[..., 1]) / 2, tf.float32)
@@ -135,14 +133,14 @@ class CropAndPad(AbstractAugment):
         self.pad_cval = pad_cval
         self.mode = mode
 
-    def _gen_crop_and_pads(self):
+    def _init_rng(self):
         crop_and_pads = tf.random_uniform((4,), seed=self.seed)
         crop_and_pads = crop_and_pads * [self.percent[1] - self.percent[0]] + self.percent[0]
         crop_and_pads = crop_and_pads * tf.cast(tf.concat([self.last_shape[1:3]] * 2, axis=0), tf.float32)
-        return tf.cast(crop_and_pads, tf.int32)
+        self.crop_and_pads = tf.cast(crop_and_pads, tf.int32)
 
     def _augment_images(self, images):
-        crop_and_pads = self._gen_crop_and_pads()
+        crop_and_pads = self.crop_and_pads
 
         crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
         images = tf.slice(
@@ -159,7 +157,7 @@ class CropAndPad(AbstractAugment):
         return tf.image.resize_images(images, self.last_shape[1:3])
 
     def _augment_keypoints(self, keypoints):
-        crop_and_pads = tf.cast(self._gen_crop_and_pads(), tf.float32)
+        crop_and_pads = tf.cast(self.crop_and_pads, tf.float32)
         _shape = tf.cast(self.last_shape[1:3], tf.float32)
         shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))[..., ::-1]
         scale = tf.reshape((crop_and_pads[:2] + crop_and_pads[2:] + _shape) / _shape, (1, 1, 2))[..., ::-1]
@@ -168,7 +166,7 @@ class CropAndPad(AbstractAugment):
         return keypoints
 
     def _augment_bboxes(self, bboxes):
-        crop_and_pads = tf.cast(self._gen_crop_and_pads(), tf.float32)
+        crop_and_pads = tf.cast(self.crop_and_pads, tf.float32)
         _shape = tf.cast(self.last_shape[1:3], tf.float32)
         shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))[..., ::-1]
         scale = tf.reshape((crop_and_pads[:2] + crop_and_pads[2:] + _shape) / _shape, (1, 1, 2))[..., ::-1]
@@ -180,7 +178,10 @@ class Fliplr(AbstractAugment):
 
     def __init__(self, p=0.5):
         super(Fliplr, self).__init__()
-        self.flip = tf.random_uniform((), seed=self.seed) < p
+        self.p = p
+
+    def _init_rng(self):
+        self.flip = tf.random_uniform((), seed=self.seed) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -209,7 +210,10 @@ class Flipud(AbstractAugment):
 
     def __init__(self, p=0.5):
         super(Flipud, self).__init__()
-        self.flip = tf.random_uniform((), seed=self.seed) < p
+        self.p = p
+
+    def _init_rng(self):
+        self.flip = tf.random_uniform((), seed=self.seed) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -242,15 +246,18 @@ class Sometimes(AbstractAugment):
         self.p = p
         self.true_augment = true_augment
         self.false_augment = false_augment
-        self.prob = tf.random_uniform((), seed=self.seed)
 
         random.seed(self.seed)
         self.true_augment._set_seed(random.randint(0, 2 ** 64))
         self.false_augment._set_seed(random.randint(0, 2 ** 64))
 
+    def _init_rng(self):
+        self.flag = tf.random_uniform((), seed=self.seed) < self.p
+
     def __call__(self, *args, **kwargs):
+        self._init_rng()
         return tf.cond(
-            self.prob < self.p,
+            self.flag,
             lambda: self.true_augment(*args, **kwargs),
             lambda: self.false_augment(*args, **kwargs)
         )
@@ -273,10 +280,14 @@ class SomeOf(AbstractAugment):
                 self.max_num = num[1]
         self.children_augments = children_augments
 
+    def _init_rng(self):
+        self.probs = tf.random_uniform((len(self.children_augments),), seed=self.seed)
+        self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self.seed)
+
     def __call__(self, *args, **kwargs):
-        probs = tf.random_uniform((len(self.children_augments),), seed=self.seed)
-        values, indices = tf.nn.top_k(probs, tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self.seed))
-        mask = tf.greater_equal(probs, tf.reduce_min(values))
+        self._init_rng()
+        values, indices = tf.nn.top_k(self.probs, self.count)
+        mask = tf.greater_equal(self.probs, tf.reduce_min(values))
 
         random.seed(self.seed)
         result = Noop()(*args, **kwargs)
