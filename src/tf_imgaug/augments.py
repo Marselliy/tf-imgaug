@@ -22,7 +22,6 @@ class AbstractAugment:
         pass
 
     def __call__(self, images, keypoints, bboxes):
-        res = list()
         self.last_shape = tf.shape(images)
 
         def _aug(e):
@@ -152,7 +151,6 @@ class CropAndPad(AbstractAugment):
         images = tf.slice(
             images,
             tf.concat([[0], -crops[:2], [0]], axis=0),
-            #tf.concat([[-1], shape[1:3] + crops[2:], [-1]], axis=0)
             tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
         )
 
@@ -294,7 +292,7 @@ class SomeOf(AbstractAugment):
             else:
                 self.max_num = num[1]
         self.children_augments = children_augments
-        
+
         for aug in self.children_augments:
             aug.separable = False
 
@@ -305,7 +303,7 @@ class SomeOf(AbstractAugment):
     def __call__(self, images, keypoints, bboxes):
         def _aug(e):
             self._init_rng()
-            values, indices = tf.nn.top_k(self.probs, self.count)
+            values, _ = tf.nn.top_k(self.probs, self.count)
             mask = tf.greater_equal(self.probs, tf.reduce_min(values))
 
             random.seed(self.seed)
