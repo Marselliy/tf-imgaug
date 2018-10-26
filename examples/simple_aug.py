@@ -19,23 +19,8 @@ seq = Sequential([
             CropAndPad((-0.25, -0.25), pad_cval=(0, 255))
         )
     ),
-    OneOf(
-        [
-            OneOf(
-                [
-                    Fliplr(1),
-                    Flipud(1)
-                ]
-            ),
-            OneOf(
-                [
-                    Rotate((30, 30)),
-                    Rotate((-30, 30))
-                ]
-            )
-        ]
-    )
-])
+    Sometimes(0.5, Fliplr(1))
+], n_augments=15)
 
 images_ph = tf.placeholder(tf.float32, (None, None, None, 3))
 keypoints_ph = tf.placeholder(tf.float32, (None, None, 2))
@@ -70,17 +55,24 @@ with tf.Session() as sess:
         }
     )
 
+images_to_show = np.concatenate([[img], images_aug], axis=0)
+keypoints_to_show = np.concatenate([kpts, keypoints_aug], axis=0)
+bboxes_to_show = np.concatenate([bboxes, bboxes_aug], axis=0)
+
 import matplotlib.pyplot as plt
 
-fig, ax = plt.subplots(ncols=2)
+fig, ax = plt.subplots(ncols=4, nrows=4, figsize=(12, 12), gridspec_kw={'wspace': 0.01, 'hspace': 0.01})
 
-ax[0].imshow(images[0].astype(np.uint8))
-ax[0].scatter(keypoints[0, :, 0], keypoints[0, :, 1], marker='x', c='g')
-ax[0].plot(bboxes[0, :, [0, 2, 2, 0, 0]], bboxes[0, :, [1, 1, 3, 3, 1]], c='b')
-ax[1].imshow(images_aug[0].astype(np.uint8))
-ax[1].scatter(keypoints_aug[0, :, 0], keypoints_aug[0, :, 1], marker='x', c='g')
-ax[1].plot(bboxes_aug[0, :, [0, 2, 2, 0, 0]], bboxes_aug[0, :, [1, 1, 3, 3, 1]], c='b')
-plt.savefig('result.png')
+for i in range(images_to_show.shape[0]):
+    _ax = ax[i // 4][i % 4]
+    _ax.imshow(images_to_show[i].astype(np.uint8))
+    _ax.scatter(keypoints_to_show[i, :, 0], keypoints_to_show[i, :, 1], marker='x', c='g')
+    _ax.plot(bboxes_to_show[i, :, [0, 2, 2, 0, 0]], bboxes_to_show[i, :, [1, 1, 3, 3, 1]], c='b')
+    _ax.set_axis_off()
+    _ax.set_xlim((0, images_to_show.shape[2]))
+    _ax.set_ylim((0, images_to_show.shape[1]))
+
+plt.savefig('result.jpg')
 
 
 
