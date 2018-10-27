@@ -9,18 +9,32 @@ import numpy as np
 import cv2
 from skimage.transform import resize
 
+import time
+
+N_AUGMENTS = 15
+SPEED_TEST_ITERATIONS = 100
+
 seq = Sequential([
-    Translate(translate_percent=dict(x=(-0.1, 0.1), y=(-0.1, 0.1))),
-    Rotate((-30, 30)),
-    OneOf(
-        (
-            CropAndPad((0.25, 0.25), pad_cval=(0, 255)),
-            Rotate((30, 30)),
-            CropAndPad((-0.25, -0.25), pad_cval=(0, 255))
-        )
+    SomeOf(
+        (0, None),
+        [
+            Fliplr(1),
+            Flipud(1),
+            Rotate((-30, 30)),
+            CropAndPad((-0.3, 0.3), pad_cval=(0, 255)),
+            Translate(dict(x=(-0.2, 0.2), y=(-0.3, 0.3)))
+        ]
     ),
-    Sometimes(0.5, Fliplr(1))
-], n_augments=15)
+    OneOf(
+        [
+            Salt(p=(0, 0.2)),
+            Pepper(p=(0, 0.2)),
+            Dropout(p=(0.3, 0.5))
+        ]
+    ),
+    JpegCompression(quality=5)
+], n_augments=N_AUGMENTS)
+
 
 images_ph = tf.placeholder(tf.float32, (None, None, None, 3))
 keypoints_ph = tf.placeholder(tf.float32, (None, None, 2))
@@ -55,6 +69,14 @@ with tf.Session() as sess:
         }
     )
 
+    start = time.time()
+    for i in range(100):
+        sess.run(_images_aug,
+            feed_dict={
+                images_ph: [img],
+            }
+        )
+    print('Speed: %.4f img/s' % (N_AUGMENTS * SPEED_TEST_ITERATIONS / (time.time() - start)))
 images_to_show = np.concatenate([[img], images_aug], axis=0)
 keypoints_to_show = np.concatenate([kpts, keypoints_aug], axis=0)
 bboxes_to_show = np.concatenate([bboxes, bboxes_aug], axis=0)

@@ -252,8 +252,8 @@ class Sometimes(AbstractAugment):
         self.false_augment = false_augment
 
         random.seed(self.seed)
-        self.true_augment._set_seed(random.randint(0, 2 ** 64))
-        self.false_augment._set_seed(random.randint(0, 2 ** 64))
+        self.true_augment._set_seed(random.randint(0, 2 ** 32))
+        self.false_augment._set_seed(random.randint(0, 2 ** 32))
         self.true_augment.separable = False
         self.false_augment.separable = False
 
@@ -278,7 +278,7 @@ class Sometimes(AbstractAugment):
 class SomeOf(AbstractAugment):
 
     def __init__(self, num, children_augments):
-        super(SomeOf, self).__init__(separable=True)
+        super(SomeOf, self).__init__()
         if type(num) == int:
             self.min_num = num
             self.max_num = num
@@ -309,7 +309,7 @@ class SomeOf(AbstractAugment):
             random.seed(self.seed)
             result = Noop()(*e)
             for i, augment in enumerate(self.children_augments):
-                augment._set_seed(random.randint(0, 2 ** 64))
+                augment._set_seed(random.randint(0, 2 ** 32))
                 result = tf.cond(
                     mask[i],
                     lambda: augment(*result),
@@ -327,3 +327,67 @@ class OneOf(SomeOf):
 
     def __init__(self, children_augments):
         super(OneOf, self).__init__((1, 1), children_augments)
+
+class AbstractNoise(AbstractAugment):
+
+    def __init__(self, noise_range, p, per_channel, seed=1337, separable=False):
+        super(AbstractNoise, self).__init__(seed=seed, separable=separable)
+
+        self.noise_range = noise_range
+        self.p = p
+        self.per_channel = per_channel
+
+    def _init_rng(self):
+        if self.per_channel:
+            noise_shape = self.last_shape
+        else:
+            noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
+
+        if type(self.p) == float:
+            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < self.p
+        else:
+            self.probs = tf.random_uniform(tf.concat([noise_shape[:1], [1, 1, 1]], axis=0), minval=self.p[0], maxval=self.p[1])
+            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < self.probs
+
+        self.mask = tf.cast(self.mask, tf.float32)
+        if self.noise_range[0] == self.noise_range[1]:
+            self.noise = tf.cast(tf.constant(self.noise_range[0]), tf.float32)
+        else:
+            self.noise = tf.random_uniform(shape=noise_shape, minval=self.noise_range[0], maxval=self.noise_range[1], seed=self.seed)
+
+    def _augment_images(self, images):
+        if self.p == 0:
+            return images
+        if self.p == 1:
+            return tf.broadcast_to(self.noise, self.last_shape)
+        return images * (1 - self.mask) + self.noise * self.mask
+
+class Salt(AbstractNoise):
+
+    def __init__(self, p=0):
+        super(Salt, self).__init__(noise_range=(196, 255), p=p, per_channel=False)
+
+class Pepper(AbstractNoise):
+
+    def __init__(self, p=0):
+        super(Pepper, self).__init__(noise_range=(0, 32), p=p, per_channel=False)
+
+class Dropout(AbstractNoise):
+
+    def __init__(self, p=0):
+        super(Dropout, self).__init__(noise_range=(0, 0), p=p, per_channel=False)
+
+class JpegCompression(AbstractAugment):
+
+    def __init__(self, quality, seed=1337, separable=True):
+        super(JpegCompression, self).__init__(seed=seed, separable=separable)
+        self.quality = quality
+
+    def _augment_images(self, images):
+        if type(self.quality) == tuple:
+            min_quality, max_quality = self.quality
+        else:
+            min_quality, max_quality = self.quality, self.quality + 1
+
+        images = tf.cast(tf.clip_by_value(images, 0., 255.), tf.uint8)
+        return tf.cast(tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self.seed), axis=0), tf.float32)
