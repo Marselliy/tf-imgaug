@@ -13,3 +13,8 @@ def p_to_tensor(p, shape, dtype=tf.float32, seed=1337):
         if type(shape) == tf.Tensor:
             return tf.cast(tf.fill(shape, p), dtype=dtype)
         return tf.constant(p, shape=shape, dtype=dtype)
+
+def coarse_map(p, shape, size_percent, seed=1337):
+    small_map_shape = tf.concat([shape[:1], tf.cast(tf.cast([size_percent] * 2, tf.float32) * 100, tf.int32), shape[-1:]], axis=0)
+    small_map = tf.cast(tf.random_uniform(small_map_shape, dtype=tf.float32, seed=seed) < p, tf.int8)
+    return tf.cast(tf.image.resize_nearest_neighbor(small_map, shape[1:3]), tf.float32)

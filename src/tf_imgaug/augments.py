@@ -2,7 +2,7 @@ import tensorflow as tf
 import math
 import random
 
-from utils import p_to_tensor
+from utils import p_to_tensor, coarse_map
 
 class AbstractAugment:
 
@@ -330,12 +330,14 @@ class OneOf(SomeOf):
 
 class AbstractNoise(AbstractAugment):
 
-    def __init__(self, noise_range, p, per_channel, seed=1337, separable=False):
+    def __init__(self, noise_range, p, per_channel, coarse, size_percent=0.01, seed=1337, separable=False):
         super(AbstractNoise, self).__init__(seed=seed, separable=separable)
 
         self.noise_range = noise_range
         self.p = p
         self.per_channel = per_channel
+        self.coarse = coarse
+        self.size_percent = size_percent
 
     def _init_rng(self):
         if self.per_channel:
@@ -343,14 +345,19 @@ class AbstractNoise(AbstractAugment):
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
 
-        p = p_to_tensor(self.p, tf.concat([noise_shape[:1], [1, 1, 1]], axis=0))
-        self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < p
-        self.mask = tf.cast(self.mask, tf.float32)
-
-        if self.noise_range[0] == self.noise_range[1]:
-            self.noise = tf.cast(tf.constant(self.noise_range[0]), tf.float32)
+        p = p_to_tensor(self.p, tf.concat([noise_shape[:1], [1, 1], noise_shape[-1:]], axis=0), seed=self.seed)
+        if self.coarse:
+            size_percent = p_to_tensor(self.size_percent, (), seed=self.seed - 1)
+            if self.per_channel:
+                map_shape = self.last_shape
+            else:
+                map_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
+            self.mask = coarse_map(p, map_shape, size_percent, seed=self.seed)
         else:
-            self.noise = tf.random_uniform(shape=noise_shape, minval=self.noise_range[0], maxval=self.noise_range[1], seed=self.seed)
+            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < p
+            self.mask = tf.cast(self.mask, tf.float32)
+
+        self.noise = p_to_tensor(self.noise_range, noise_shape, seed=self.seed)
 
     def _augment_images(self, images):
         if self.p == 0:
@@ -362,17 +369,32 @@ class AbstractNoise(AbstractAugment):
 class Salt(AbstractNoise):
 
     def __init__(self, p=0):
-        super(Salt, self).__init__(noise_range=(196, 255), p=p, per_channel=False)
+        super(Salt, self).__init__(noise_range=(196, 255), p=p, per_channel=False, coarse=True)
+
+class CoarseSalt(AbstractNoise):
+
+    def __init__(self, p=0, size_percent=0.01):
+        super(CoarseSalt, self).__init__(noise_range=(196, 255), p=p, per_channel=False, coarse=True, size_percent=size_percent)
 
 class Pepper(AbstractNoise):
 
     def __init__(self, p=0):
         super(Pepper, self).__init__(noise_range=(0, 32), p=p, per_channel=False)
 
+class CoarsePepper(AbstractNoise):
+
+    def __init__(self, p=0, size_percent=0.01):
+        super(CoarsePepper, self).__init__(noise_range=(0, 32), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+
 class Dropout(AbstractNoise):
 
-    def __init__(self, p=0):
-        super(Dropout, self).__init__(noise_range=(0, 0), p=p, per_channel=False)
+    def __init__(self, p=0, per_channel=False):
+        super(Dropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=False)
+
+class CoarseDropout(AbstractNoise):
+
+    def __init__(self, p=0, size_percent=0.01, per_channel=False):
+        super(CoarseDropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=True, size_percent=size_percent)
 
 class JpegCompression(AbstractAugment):
 
