@@ -436,3 +436,27 @@ class AdditiveGaussianNoise(AbstractAugment):
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
         return tf.clip_by_value(images + tf.random_normal(noise_shape) * scale, 0, 255)
 
+class Grayscale(AbstractAugment):
+
+    def __init__(self, p, seed=1337):
+        super(Grayscale, self).__init__(seed=seed, separable=False)
+        self.p = p
+    
+    def _augment_images(self, images):
+        p = p_to_tensor(self.p, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed)
+        rgb_weights = [0.2989, 0.5870, 0.1140]
+        r = \
+            images[..., :1] * (p * (rgb_weights[0] - 1) + 1) + \
+            images[..., 1:2] * p * rgb_weights[1] + \
+            images[..., 2:3] * p * rgb_weights[2]
+        g = \
+            images[..., :1] * p * rgb_weights[0] + \
+            images[..., 1:2] * (p * (rgb_weights[1] - 1) + 1) + \
+            images[..., 2:3] * p * rgb_weights[2]
+        b = \
+            images[..., :1] * p * rgb_weights[0] + \
+            images[..., 1:2] * p * rgb_weights[1] + \
+            images[..., 2:3] * (p * (rgb_weights[2] - 1) + 1)
+
+        return tf.concat([r, g, b], axis=-1)
+
