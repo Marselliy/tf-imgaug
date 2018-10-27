@@ -369,7 +369,7 @@ class AbstractNoise(AbstractAugment):
 class Salt(AbstractNoise):
 
     def __init__(self, p=0):
-        super(Salt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=True)
+        super(Salt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=False)
 
 class CoarseSalt(AbstractNoise):
 
@@ -379,12 +379,23 @@ class CoarseSalt(AbstractNoise):
 class Pepper(AbstractNoise):
 
     def __init__(self, p=0):
-        super(Pepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False)
+        super(Pepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=False)
 
 class CoarsePepper(AbstractNoise):
 
     def __init__(self, p=0, size_percent=0.01):
         super(CoarsePepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+
+class SaltAndPepper(AbstractNoise):
+
+    def __init__(self, p=0):
+        super(SaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=False)
+
+class CoarseSaltAndPepper(AbstractNoise):
+
+    def __init__(self, p=0, size_percent=0.01):
+        super(CoarseSaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+
 
 class Dropout(AbstractNoise):
 
