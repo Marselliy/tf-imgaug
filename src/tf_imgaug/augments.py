@@ -396,7 +396,6 @@ class CoarseSaltAndPepper(AbstractNoise):
     def __init__(self, p=0, size_percent=0.01):
         super(CoarseSaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=True, size_percent=size_percent)
 
-
 class Dropout(AbstractNoise):
 
     def __init__(self, p=0, per_channel=False):
@@ -421,3 +420,19 @@ class JpegCompression(AbstractAugment):
 
         images = tf.cast(tf.clip_by_value(images, 0., 255.), tf.uint8)
         return tf.cast(tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self.seed), axis=0), tf.float32)
+
+class AdditiveGaussianNoise(AbstractAugment):
+
+    def __init__(self, scale, per_channel=True, seed=1337):
+        super(AdditiveGaussianNoise, self).__init__(seed=seed, separable=False)
+        self.scale = scale
+        self.per_channel = per_channel
+    
+    def _augment_images(self, images):
+        scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed) * 255
+        if self.per_channel:
+            noise_shape = self.last_shape
+        else:
+            noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
+        return tf.clip_by_value(images + tf.random_normal(noise_shape) * scale, 0, 255)
+
