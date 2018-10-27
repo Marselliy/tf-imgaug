@@ -2,6 +2,8 @@ import tensorflow as tf
 import math
 import random
 
+from utils import p_to_tensor
+
 class AbstractAugment:
 
     def __init__(self, seed=1337, separable=True):
@@ -85,8 +87,7 @@ class Rotate(AbstractAugment):
         self.interpolation = interpolation
 
     def _init_rng(self):
-        angles = tf.random_uniform(self.last_shape[:1], seed=self.seed)
-        self.angles = (angles * (self.rotations[1] - self.rotations[0]) + self.rotations[0]) * math.pi / 180
+        self.angles = p_to_tensor(self.rotations, shape=self.last_shape[:1], seed=self.seed) * math.pi / 180
 
     def _augment_images(self, images):
         return tf.contrib.image.rotate(images, self.angles, self.interpolation)
@@ -139,8 +140,7 @@ class CropAndPad(AbstractAugment):
         self.mode = mode
 
     def _init_rng(self):
-        crop_and_pads = tf.random_uniform((4,), seed=self.seed)
-        crop_and_pads = crop_and_pads * [self.percent[1] - self.percent[0]] + self.percent[0]
+        crop_and_pads = p_to_tensor(self.percent, shape=(4,), dtype=tf.float32)
         crop_and_pads = crop_and_pads * tf.cast(tf.concat([self.last_shape[1:3]] * 2, axis=0), tf.float32)
         self.crop_and_pads = tf.cast(crop_and_pads, tf.int32)
 
@@ -343,13 +343,10 @@ class AbstractNoise(AbstractAugment):
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
 
-        if type(self.p) == float:
-            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < self.p
-        else:
-            self.probs = tf.random_uniform(tf.concat([noise_shape[:1], [1, 1, 1]], axis=0), minval=self.p[0], maxval=self.p[1])
-            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < self.probs
-
+        p = p_to_tensor(self.p, tf.concat([noise_shape[:1], [1, 1, 1]], axis=0))
+        self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < p
         self.mask = tf.cast(self.mask, tf.float32)
+
         if self.noise_range[0] == self.noise_range[1]:
             self.noise = tf.cast(tf.constant(self.noise_range[0]), tf.float32)
         else:
