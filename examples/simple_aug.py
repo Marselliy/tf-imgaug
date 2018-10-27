@@ -70,7 +70,7 @@ with tf.Session() as sess:
     )
 
     start = time.time()
-    for i in range(100):
+    for i in range(SPEED_TEST_ITERATIONS):
         sess.run(_images_aug,
             feed_dict={
                 images_ph: [img],
