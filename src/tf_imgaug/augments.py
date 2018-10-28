@@ -62,11 +62,10 @@ class Translate(AbstractAugment):
         self.interpolation = interpolation
 
     def _init_rng(self):
-        translations = tf.random_uniform(tf.concat([self.last_shape[:1], [2]], axis=0), seed=self.seed)
-        translations = translations * [[
-            self.translate_percent['x'][1] - self.translate_percent['x'][0],
-            self.translate_percent['y'][1] - self.translate_percent['y'][0]
-        ]] + [[self.translate_percent['x'][0] + self.translate_percent['y'][0]]]
+        translations = tf.stack([
+            p_to_tensor(self.translate_percent['x'], shape=self.last_shape[:1], seed=self.seed),
+            p_to_tensor(self.translate_percent['y'], shape=self.last_shape[:1], seed=self.seed + 1),
+        ], axis=-1)
         self.translations = translations * tf.expand_dims(tf.cast(self.last_shape[1:3], tf.float32), axis=0)
 
     def _augment_images(self, images):
