@@ -2,6 +2,8 @@ import tensorflow as tf
 
 def p_to_tensor(p, shape, dtype=tf.float32, seed=1337):
     if type(p) == tuple and p[0] != p[1]:
+        if dtype == tf.uint8:
+            return tf.cast(tf.random_uniform(shape=shape, dtype=tf.int32, minval=p[0], maxval=p[1], seed=seed), tf.uint8)
         return tf.random_uniform(shape=shape, dtype=dtype, minval=p[0], maxval=p[1], seed=seed)
     elif type(p) == list and len(p) != 1:
         logits = tf.random_uniform([1, len(p)], seed=seed)
@@ -10,11 +12,11 @@ def p_to_tensor(p, shape, dtype=tf.float32, seed=1337):
     else:
         if hasattr(p, '__getitem__'):
             p = p[0]
-        if type(shape) == tf.Tensor:
+        if tf.contrib.framework.is_tensor(shape):
             return tf.cast(tf.fill(shape, p), dtype=dtype)
         return tf.constant(p, shape=shape, dtype=dtype)
 
 def coarse_map(p, shape, size_percent, seed=1337):
     small_map_shape = tf.concat([shape[:1], tf.cast(tf.cast([size_percent] * 2, tf.float32) * 100, tf.int32), shape[-1:]], axis=0)
-    small_map = tf.cast(tf.random_uniform(small_map_shape, dtype=tf.float32, seed=seed) < p, tf.int8)
-    return tf.cast(tf.image.resize_nearest_neighbor(small_map, shape[1:3]), tf.float32)
+    small_map = tf.cast(tf.random_uniform(small_map_shape, dtype=tf.float32, seed=seed) < p, tf.uint8)
+    return tf.cast(tf.image.resize_nearest_neighbor(small_map, shape[1:3]), tf.bool)

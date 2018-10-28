@@ -25,6 +25,7 @@ class AbstractAugment:
 
     def __call__(self, images, keypoints, bboxes):
         self.last_shape = tf.shape(images)
+        self.last_dtype = images.dtype
 
         def _aug(e):
             self._init_rng()
@@ -144,6 +145,7 @@ class CropAndPad(AbstractAugment):
         self.crop_and_pads = tf.cast(crop_and_pads, tf.int32)
 
     def _augment_images(self, images):
+        dtype = images.dtype
         crop_and_pads = self.crop_and_pads
 
         crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
@@ -152,12 +154,15 @@ class CropAndPad(AbstractAugment):
             tf.concat([[0], -crops[:2], [0]], axis=0),
             tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
         )
-
         pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
-        pad_cval = tf.random_uniform((), minval=self.pad_cval[0], maxval=self.pad_cval[1], seed=self.seed) if type(self.pad_cval) == tuple else self.pad_cval
+        pad_cval = p_to_tensor(self.pad_cval, (), dtype=images.dtype)
         images = tf.pad(images, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=pad_cval)
-
-        return tf.image.resize_images(images, self.last_shape[1:3])
+        
+        resized = tf.image.resize_images(
+            images,
+            self.last_shape[1:3]
+        )
+        return tf.image.convert_image_dtype(resized, dtype),
 
     def _augment_keypoints(self, keypoints):
         crop_and_pads = tf.cast(self.crop_and_pads, tf.float32)
@@ -354,16 +359,20 @@ class AbstractNoise(AbstractAugment):
             self.mask = coarse_map(p, map_shape, size_percent, seed=self.seed)
         else:
             self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < p
-            self.mask = tf.cast(self.mask, tf.float32)
+            self.mask = tf.cast(self.mask, tf.bool)
 
-        self.noise = p_to_tensor(self.noise_range, noise_shape, seed=self.seed)
+        self.noise = p_to_tensor(self.noise_range, noise_shape, dtype=self.last_dtype, seed=self.seed)
 
     def _augment_images(self, images):
         if self.p == 0:
             return images
         if self.p == 1:
             return tf.broadcast_to(self.noise, self.last_shape)
-        return images * (1 - self.mask) + self.noise * self.mask
+
+        if not self.per_channel:
+            self.mask = tf.tile(self.mask, tf.concat([[1, 1, 1], self.last_shape[-1:]], axis=0))
+            self.noise = tf.tile(self.noise, tf.concat([[1, 1, 1], self.last_shape[-1:]], axis=0))
+        return tf.where(tf.cast(self.mask, tf.bool), self.noise, images)
 
 class Salt(AbstractNoise):
 
@@ -407,8 +416,8 @@ class CoarseDropout(AbstractNoise):
 
 class JpegCompression(AbstractAugment):
 
-    def __init__(self, quality, seed=1337, separable=True):
-        super(JpegCompression, self).__init__(seed=seed, separable=separable)
+    def __init__(self, quality, seed=1337):
+        super(JpegCompression, self).__init__(seed=seed, separable=True)
         self.quality = quality
 
     def _augment_images(self, images):
@@ -417,8 +426,7 @@ class JpegCompression(AbstractAugment):
         else:
             min_quality, max_quality = self.quality, self.quality + 1
 
-        images = tf.cast(tf.clip_by_value(images, 0., 255.), tf.uint8)
-        return tf.cast(tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self.seed), axis=0), tf.float32)
+        return tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self.seed), axis=0)
 
 class AdditiveGaussianNoise(AbstractAugment):
 
@@ -428,12 +436,18 @@ class AdditiveGaussianNoise(AbstractAugment):
         self.per_channel = per_channel
     
     def _augment_images(self, images):
-        scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed) * 255
+        scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed)
+        if images.dtype != tf.float32:
+            scale = scale * 255.
+            maxval = 255
+        else:
+            maxval = 1
         if self.per_channel:
             noise_shape = self.last_shape
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
-        return tf.clip_by_value(images + tf.random_normal(noise_shape) * scale, 0, 255)
+            
+        return tf.cast(tf.clip_by_value(tf.cast(images, tf.int32) + tf.cast(tf.random_normal(noise_shape) * scale, tf.int32), 0, maxval), images.dtype)
 
 class Grayscale(AbstractAugment):
 
@@ -444,18 +458,25 @@ class Grayscale(AbstractAugment):
     def _augment_images(self, images):
         p = p_to_tensor(self.p, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed)
         rgb_weights = [0.2989, 0.5870, 0.1140]
-        r = \
-            images[..., :1] * (p * (rgb_weights[0] - 1) + 1) + \
-            images[..., 1:2] * p * rgb_weights[1] + \
-            images[..., 2:3] * p * rgb_weights[2]
-        g = \
-            images[..., :1] * p * rgb_weights[0] + \
-            images[..., 1:2] * (p * (rgb_weights[1] - 1) + 1) + \
-            images[..., 2:3] * p * rgb_weights[2]
-        b = \
-            images[..., :1] * p * rgb_weights[0] + \
-            images[..., 1:2] * p * rgb_weights[1] + \
-            images[..., 2:3] * (p * (rgb_weights[2] - 1) + 1)
 
-        return tf.concat([r, g, b], axis=-1)
+        images_float = images
+        if images.dtype != tf.float32:
+            images_float = tf.cast(images_float, tf.float32)
+        r = \
+            images_float[..., :1] * (p * (rgb_weights[0] - 1) + 1) + \
+            images_float[..., 1:2] * p * rgb_weights[1] + \
+            images_float[..., 2:3] * p * rgb_weights[2]
+        g = \
+            images_float[..., :1] * p * rgb_weights[0] + \
+            images_float[..., 1:2] * (p * (rgb_weights[1] - 1) + 1) + \
+            images_float[..., 2:3] * p * rgb_weights[2]
+        b = \
+            images_float[..., :1] * p * rgb_weights[0] + \
+            images_float[..., 1:2] * p * rgb_weights[1] + \
+            images_float[..., 2:3] * (p * (rgb_weights[2] - 1) + 1)
+
+        res = tf.concat([r, g, b], axis=-1)
+        if images.dtype != tf.float32:
+            res = tf.cast(res, images.dtype)
+        return res
 
