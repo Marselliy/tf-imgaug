@@ -1,10 +1,11 @@
 import sys
 import os
 
-sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'src', 'tf_imgaug'))
+sys.path.append(os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'src'))
 
-from sequential import Sequential
-from augments import *
+from tf_imgaug.sequential import Sequential
+from tf_imgaug.augments import *
+
 import numpy as np
 import cv2
 from skimage.transform import resize

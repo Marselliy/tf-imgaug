@@ -2,7 +2,7 @@ import tensorflow as tf
 import math
 import random
 
-from utils import p_to_tensor, coarse_map
+from .utils import p_to_tensor, coarse_map
 
 class AbstractAugment:
 
@@ -162,7 +162,7 @@ class CropAndPad(AbstractAugment):
             images,
             self.last_shape[1:3]
         )
-        return tf.image.convert_image_dtype(resized, dtype),
+        return tf.image.convert_image_dtype(resized, dtype)
 
     def _augment_keypoints(self, keypoints):
         crop_and_pads = tf.cast(self.crop_and_pads, tf.float32)
