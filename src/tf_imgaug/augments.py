@@ -785,3 +785,14 @@ class Multiply(AbstractAugment):
 
         return res
 
+class RandomResize(AbstractAugment):
+
+    def __init__(self, size_percent, seed=1337):
+        super(RandomResize, self).__init__(seed=seed, separable=True)
+
+        self.value = size_percent = size_percent
+
+    def _augment_images(self, images):
+        size = tf.cast(p_to_tensor(self.value, (), seed=self._gen_seed()) * tf.cast(self.last_shape[1:3], tf.float32), tf.int32)
+
+        return tf.image.resize_images(tf.image.resize_images(images, size), self.last_shape[1:3])
