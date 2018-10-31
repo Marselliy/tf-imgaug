@@ -88,7 +88,7 @@ fig, ax = plt.subplots(ncols=4, nrows=4, figsize=(12, 12), gridspec_kw={'wspace'
 
 for i in range(images_to_show.shape[0]):
     _ax = ax[i // 4][i % 4]
-    _ax.imshow(images_to_show[i].astype(np.uint8))
+    _ax.imshow(images_to_show[i])
     _ax.scatter(keypoints_to_show[i, :, 0], keypoints_to_show[i, :, 1], marker='x', c='g')
     _ax.plot(bboxes_to_show[i, :, [0, 2, 2, 0, 0]], bboxes_to_show[i, :, [1, 1, 3, 3, 1]], c='b')
     _ax.set_axis_off()
