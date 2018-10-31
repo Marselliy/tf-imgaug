@@ -7,11 +7,14 @@ from .utils import p_to_tensor, coarse_map
 class AbstractAugment:
 
     def __init__(self, seed=1337, separable=True):
-        self.seed = seed
+        self.random = random.Random(seed)
         self.separable = separable
 
     def _set_seed(self, seed):
-        self.seed = seed
+        self.random.seed(seed)
+
+    def _gen_seed(self):
+        return self.random.randint(0, 2 ** 32)
 
     def _augment_images(self, images):
         return images
@@ -24,34 +27,35 @@ class AbstractAugment:
         pass
 
     def __call__(self, images, keypoints, bboxes):
-        self.last_shape = tf.shape(images)
-        self.last_dtype = images.dtype
+        with tf.name_scope(type(self).__name__):
+            self.last_shape = tf.shape(images)
+            self.last_dtype = images.dtype
 
-        if not isinstance(keypoints, tuple):
-            raise ValueError('keypoints is not a tuple')
+            if not isinstance(keypoints, tuple):
+                raise ValueError('keypoints is not a tuple')
 
-        if not isinstance(bboxes, tuple):
-            raise ValueError('bboxes is not a tuple')
+            if not isinstance(bboxes, tuple):
+                raise ValueError('bboxes is not a tuple')
 
-        keypoints, keypoints_fmt = keypoints
-        bboxes, bboxes_fmt = bboxes
+            keypoints, keypoints_fmt = keypoints
+            bboxes, bboxes_fmt = bboxes
 
-        def _aug(e):
-            self._init_rng()
-            return (
-                self._augment_images(e[0]), 
-                self._augment_keypoints(*e[1]),
-                self._augment_bboxes(*e[2])
-            )
+            def _aug(e):
+                self._init_rng()
+                return (
+                    self._augment_images(e[0]), 
+                    self._augment_keypoints(*e[1]),
+                    self._augment_bboxes(*e[2])
+                )
 
-        if self.separable:
-            def wrapper(args):
-                return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+            if self.separable:
+                def wrapper(args):
+                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
 
-            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
-        else:
-            return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+            else:
+                return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
 
 class Noop(AbstractAugment):
 
@@ -75,10 +79,10 @@ class Translate(AbstractAugment):
         self.interpolation = interpolation
 
     def _init_rng(self):
-        self.trans_x = p_to_tensor(self.translate_percent['x'], shape=self.last_shape[:1], seed=self.seed)
+        self.trans_x = p_to_tensor(self.translate_percent['x'], shape=self.last_shape[:1], seed=self._gen_seed())
         self.trans_x = self.trans_x * tf.cast(self.last_shape[2], tf.float32)
 
-        self.trans_y = p_to_tensor(self.translate_percent['y'], shape=self.last_shape[:1], seed=self.seed + 1)
+        self.trans_y = p_to_tensor(self.translate_percent['y'], shape=self.last_shape[:1], seed=self._gen_seed())
         self.trans_y = self.trans_y * tf.cast(self.last_shape[1], tf.float32)
 
         self.translations_xy = tf.stack([self.trans_x, self.trans_y], axis=-1)
@@ -116,7 +120,7 @@ class Rotate(AbstractAugment):
         self.interpolation = interpolation
 
     def _init_rng(self):
-        self.angles = p_to_tensor(self.rotations, shape=self.last_shape[:1], seed=self.seed) * math.pi / 180
+        self.angles = p_to_tensor(self.rotations, shape=self.last_shape[:1], seed=self._gen_seed()) * math.pi / 180
 
     def _augment_images(self, images):
         return tf.contrib.image.rotate(images, self.angles, self.interpolation)
@@ -287,7 +291,7 @@ class CropAndPad(AbstractAugment):
         pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
         pad_cval = p_to_tensor(self.pad_cval, (), dtype=images.dtype)
         images = tf.pad(images, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=pad_cval)
-        
+
         resized = tf.image.resize_images(
             images,
             self.last_shape[1:3]
@@ -357,7 +361,7 @@ class Fliplr(AbstractAugment):
         self.p = p
 
     def _init_rng(self):
-        self.flip = tf.random_uniform((), seed=self.seed) < self.p
+        self.flip = tf.random_uniform((), seed=self._gen_seed()) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -423,7 +427,7 @@ class Flipud(AbstractAugment):
         self.p = p
 
     def _init_rng(self):
-        self.flip = tf.random_uniform((), seed=self.seed) < self.p
+        self.flip = tf.random_uniform((), seed=self._gen_seed()) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -491,14 +495,13 @@ class Sometimes(AbstractAugment):
         self.true_augment = true_augment
         self.false_augment = false_augment
 
-        random.seed(self.seed)
-        self.true_augment._set_seed(random.randint(0, 2 ** 32))
-        self.false_augment._set_seed(random.randint(0, 2 ** 32))
+        self.true_augment._set_seed(self._gen_seed())
+        self.false_augment._set_seed(self._gen_seed())
         self.true_augment.separable = False
         self.false_augment.separable = False
 
     def _init_rng(self):
-        self.flag = tf.random_uniform((), seed=self.seed) < self.p
+        self.flag = tf.random_uniform((), seed=self._gen_seed()) < self.p
 
     def __call__(self, images, keypoints, bboxes):
         if not isinstance(keypoints, tuple):
@@ -507,30 +510,31 @@ class Sometimes(AbstractAugment):
         if not isinstance(bboxes, tuple):
             raise ValueError('bboxes is not a tuple')
 
-        keypoints, keypoints_fmt = keypoints
-        bboxes, bboxes_fmt = bboxes
+        with tf.name_scope(type(self).__name__):
+            keypoints, keypoints_fmt = keypoints
+            bboxes, bboxes_fmt = bboxes
 
-        def _aug(e):
-            self._init_rng()
-            return tf.cond(
-                self.flag,
-                lambda: self.true_augment(*e),
-                lambda: self.false_augment(*e)
-            )
+            def _aug(e):
+                self._init_rng()
+                return tf.cond(
+                    self.flag,
+                    lambda: self.true_augment(*e),
+                    lambda: self.false_augment(*e)
+                )
 
-        if self.separable:
-            def wrapper(args):
-                return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+            if self.separable:
+                def wrapper(args):
+                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
 
-            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
-        else:
-            return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+            else:
+                return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
 
 class SomeOf(AbstractAugment):
 
-    def __init__(self, num, children_augments):
-        super(SomeOf, self).__init__()
+    def __init__(self, num, children_augments, separable=True):
+        super(SomeOf, self).__init__(separable=separable)
         if type(num) == int:
             self.min_num = num
             self.max_num = num
@@ -549,8 +553,8 @@ class SomeOf(AbstractAugment):
             aug.separable = False
 
     def _init_rng(self):
-        self.probs = tf.random_uniform((len(self.children_augments),), seed=self.seed)
-        self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self.seed)
+        self.probs = tf.random_uniform((len(self.children_augments),), seed=self._gen_seed())
+        self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
 
     def __call__(self, images, keypoints, bboxes):
         if not isinstance(keypoints, tuple):
@@ -559,37 +563,37 @@ class SomeOf(AbstractAugment):
         if not isinstance(bboxes, tuple):
             raise ValueError('bboxes is not a tuple')
 
-        keypoints, keypoints_fmt = keypoints
-        bboxes, bboxes_fmt = bboxes
-        def _aug(e):
-            self._init_rng()
-            values, _ = tf.nn.top_k(self.probs, self.count)
-            mask = tf.greater_equal(self.probs, tf.reduce_min(values))
+        with tf.name_scope(type(self).__name__):
+            keypoints, keypoints_fmt = keypoints
+            bboxes, bboxes_fmt = bboxes
+            def _aug(e):
+                self._init_rng()
+                values, _ = tf.nn.top_k(self.probs, self.count)
+                mask = tf.greater_equal(self.probs, tf.reduce_min(values))
 
-            random.seed(self.seed)
-            result = Noop()(*e)
-            for i, augment in enumerate(self.children_augments):
-                augment._set_seed(random.randint(0, 2 ** 32))
-                result = tf.cond(
-                    mask[i],
-                    lambda: augment(*(result[0], (result[1], keypoints_fmt), (result[2], bboxes_fmt))),
-                    lambda: result
-                )
-            return result
+                result = Noop()(*e)
+                for i, augment in enumerate(self.children_augments):
+                    augment._set_seed(random.randint(0, 2 ** 32))
+                    result = tf.cond(
+                        mask[i],
+                        lambda: augment(*(result[0], (result[1], keypoints_fmt), (result[2], bboxes_fmt))),
+                        lambda: result
+                    )
+                return result
 
-        if self.separable:
-            def wrapper(args):
-                return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+            if self.separable:
+                def wrapper(args):
+                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
 
-            images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-            return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
-        else:
-            return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+            else:
+                return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
 
 class OneOf(SomeOf):
 
-    def __init__(self, children_augments):
-        super(OneOf, self).__init__((1, 1), children_augments)
+    def __init__(self, children_augments, separable=True):
+        super(OneOf, self).__init__((1, 1), children_augments, separable)
 
 class AbstractNoise(AbstractAugment):
 
@@ -608,19 +612,19 @@ class AbstractNoise(AbstractAugment):
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
 
-        p = p_to_tensor(self.p, tf.concat([noise_shape[:1], [1, 1], noise_shape[-1:]], axis=0), seed=self.seed)
+        p = p_to_tensor(self.p, tf.concat([noise_shape[:1], [1, 1], noise_shape[-1:]], axis=0), seed=self._gen_seed())
         if self.coarse:
-            size_percent = p_to_tensor(self.size_percent, (), seed=self.seed - 1)
+            size_percent = p_to_tensor(self.size_percent, (), seed=self._gen_seed())
             if self.per_channel:
                 map_shape = self.last_shape
             else:
                 map_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
-            self.mask = coarse_map(p, map_shape, size_percent, seed=self.seed)
+            self.mask = coarse_map(p, map_shape, size_percent, seed=self._gen_seed())
         else:
-            self.mask = tf.random_uniform(shape=noise_shape, seed=self.seed) < p
+            self.mask = tf.random_uniform(shape=noise_shape, seed=self._gen_seed()) < p
             self.mask = tf.cast(self.mask, tf.bool)
 
-        self.noise = p_to_tensor(self.noise_range, noise_shape, dtype=self.last_dtype, seed=self.seed)
+        self.noise = p_to_tensor(self.noise_range, noise_shape, dtype=self.last_dtype, seed=self._gen_seed())
 
     def _augment_images(self, images):
         if self.p == 0:
@@ -685,7 +689,7 @@ class JpegCompression(AbstractAugment):
         else:
             min_quality, max_quality = self.quality, self.quality + 1
 
-        return tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self.seed), axis=0)
+        return tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self._gen_seed()), axis=0)
 
 class AdditiveGaussianNoise(AbstractAugment):
 
@@ -693,9 +697,9 @@ class AdditiveGaussianNoise(AbstractAugment):
         super(AdditiveGaussianNoise, self).__init__(seed=seed, separable=False)
         self.scale = scale
         self.per_channel = per_channel
-    
+
     def _augment_images(self, images):
-        scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed)
+        scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self._gen_seed())
         if images.dtype != tf.float32:
             scale = scale * 255.
             maxval = 255
@@ -705,17 +709,17 @@ class AdditiveGaussianNoise(AbstractAugment):
             noise_shape = self.last_shape
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
-            
-        return tf.cast(tf.clip_by_value(tf.cast(images, tf.int32) + tf.cast(tf.random_normal(noise_shape) * scale, tf.int32), 0, maxval), images.dtype)
+
+        return tf.cast(tf.clip_by_value(tf.cast(images, tf.int32) + tf.cast(tf.random_normal(noise_shape, self._gen_seed()) * scale, tf.int32), 0, maxval), images.dtype)
 
 class Grayscale(AbstractAugment):
 
     def __init__(self, p, seed=1337):
         super(Grayscale, self).__init__(seed=seed, separable=False)
         self.p = p
-    
+
     def _augment_images(self, images):
-        p = p_to_tensor(self.p, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self.seed)
+        p = p_to_tensor(self.p, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self._gen_seed())
         rgb_weights = [0.2989, 0.5870, 0.1140]
 
         images_float = images
