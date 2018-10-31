@@ -526,7 +526,7 @@ class Sometimes(AbstractAugment):
                 def wrapper(args):
                     return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
 
-                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(_aug, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
+                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
                 return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
             else:
                 return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
