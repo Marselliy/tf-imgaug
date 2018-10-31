@@ -283,8 +283,8 @@ class Sometimes(AbstractAugment):
 
 class SomeOf(AbstractAugment):
 
-    def __init__(self, num, children_augments):
-        super(SomeOf, self).__init__()
+    def __init__(self, num, children_augments, separable=True):
+        super(SomeOf, self).__init__(separable=separable)
         if type(num) == int:
             self.min_num = num
             self.max_num = num
@@ -333,8 +333,8 @@ class SomeOf(AbstractAugment):
 
 class OneOf(SomeOf):
 
-    def __init__(self, children_augments):
-        super(OneOf, self).__init__((1, 1), children_augments)
+    def __init__(self, children_augments, separable=True):
+        super(OneOf, self).__init__((1, 1), children_augments, separable)
 
 class AbstractNoise(AbstractAugment):
 
