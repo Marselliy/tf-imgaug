@@ -743,3 +743,45 @@ class Grayscale(AbstractAugment):
             res = tf.cast(res, images.dtype)
         return res
 
+class Add(AbstractAugment):
+
+    def __init__(self, value, per_channel=False, seed=1337):
+        super(Add, self).__init__(seed=seed, separable=False)
+
+        self.value = value
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        value = p_to_tensor(self.value, tf.concat([self.last_shape[:1], [1, 1], [3] if self.per_channel else [1]], axis=0), seed=self._gen_seed())
+
+        if images.dtype != tf.float32:
+            value = tf.cast(value * 255., images.dtype)
+            maxval = 255
+        else:
+            maxval = 1
+
+        return tf.clip_by_value(images + value, 0, maxval)
+
+class Multiply(AbstractAugment):
+
+    def __init__(self, value, per_channel=False, seed=1337):
+        super(Multiply, self).__init__(seed=seed, separable=False)
+
+        self.value = value
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        value = p_to_tensor(self.value, tf.concat([self.last_shape[:1], [1, 1], [3] if self.per_channel else [1]], axis=0), seed=self._gen_seed())
+
+        if images.dtype != tf.float32:
+            maxval = 255
+        else:
+            maxval = 1
+
+        res = tf.clip_by_value(images * value, 0, maxval)
+
+        if res.dtype != images.dtype:
+            res = tf.cast(res, images.dtype)
+
+        return res
+
