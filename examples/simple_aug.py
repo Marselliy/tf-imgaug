@@ -37,7 +37,7 @@ seq = Sequential([
 ], n_augments=N_AUGMENTS)
 
 
-images_ph = tf.placeholder(tf.float32, (None, None, None, 3))
+images_ph = tf.placeholder(tf.uint8, (None, None, None, 3))
 keypoints_ph = tf.placeholder(tf.float32, (None, None, 2))
 bboxes_ph = tf.placeholder(tf.float32, (None, None, 4))
 _images_aug, _keypoints_aug, _bboxes_aug = seq(images=images_ph, keypoints=keypoints_ph, bboxes=bboxes_ph)
