@@ -700,17 +700,18 @@ class AdditiveGaussianNoise(AbstractAugment):
 
     def _augment_images(self, images):
         scale = p_to_tensor(self.scale, tf.concat([self.last_shape[:1], [1, 1, 1]], axis=0), seed=self._gen_seed())
-        if images.dtype != tf.float32:
-            scale = scale * 255.
-            maxval = 255
-        else:
-            maxval = 1
+        images_float = images
+        if images_float.dtype != tf.float32:
+            images_float = tf.image.convert_image_dtype(images_float, tf.float32)
         if self.per_channel:
             noise_shape = self.last_shape
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
 
-        return tf.cast(tf.clip_by_value(tf.cast(images, tf.int32) + tf.cast(tf.random_normal(noise_shape, self._gen_seed()) * scale, tf.int32), 0, maxval), images.dtype)
+        res = tf.image.convert_image_dtype(tf.clip_by_value(images_float + tf.random_normal(noise_shape, seed=self._gen_seed()) * scale, 0, 1), images.dtype)
+        if res.dtype != images.dtype:
+            res = tf.image.convert_image_dtype(res, images.dtype)
+        return res
 
 class Grayscale(AbstractAugment):
 
