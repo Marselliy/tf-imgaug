@@ -574,6 +574,7 @@ class SomeOf(AbstractAugment):
                 result = Noop()(*e)
                 for i, augment in enumerate(self.children_augments):
                     augment._set_seed(random.randint(0, 2 ** 32))
+                    augment.separable = False
                     result = tf.cond(
                         mask[i],
                         lambda: augment(*(result[0], (result[1], keypoints_fmt), (result[2], bboxes_fmt))),
