@@ -267,14 +267,22 @@ class Rotate(AbstractAugment):
 
 class CropAndPad(AbstractAugment):
 
-    def __init__(self, percent, pad_cval=0, mode='CONSTANT'):
+    def __init__(self, percent, pad_cval=0, mode='CONSTANT', keep_ratio=False):
         super(CropAndPad, self).__init__()
         self.percent = percent
         self.pad_cval = pad_cval
         self.mode = mode
+        self.keep_ratio = keep_ratio
 
     def _init_rng(self):
-        crop_and_pads = p_to_tensor(self.percent, shape=(4,), dtype=tf.float32)
+        if self.keep_ratio:
+            crop_and_pads = p_to_tensor(self.percent, shape=(3,), dtype=tf.float32)
+            crop_and_pads = tf.concat([
+                crop_and_pads, 
+                tf.expand_dims(crop_and_pads[2] + crop_and_pads[0] - crop_and_pads[1], axis=0)
+            ], axis=0)
+        else:
+            crop_and_pads = p_to_tensor(self.percent, shape=(4,), dtype=tf.float32)
         crop_and_pads = crop_and_pads * tf.cast(tf.concat([self.last_shape[1:3]] * 2, axis=0), tf.float32)
         self.crop_and_pads = tf.cast(crop_and_pads, tf.int32)
 
