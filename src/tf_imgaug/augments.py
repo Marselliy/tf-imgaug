@@ -806,3 +806,46 @@ class RandomResize(AbstractAugment):
         size = tf.cast(p_to_tensor(self.value, (), seed=self._gen_seed()) * tf.cast(self.last_shape[1:3], tf.float32), tf.int32)
 
         return tf.image.resize_images(tf.image.resize_images(images, size), self.last_shape[1:3])
+
+class LinearContrast(AbstractAugment):
+
+    def __init__(self, alpha, per_channel=False, seed=1337):
+        super(LinearContrast, self).__init__(seed=seed, separable=False)
+
+        self.alpha = alpha
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        alpha = p_to_tensor(self.alpha, [tf.shape(images)[0], 1, 1, 3 if self.per_channel else 1], seed=self._gen_seed())
+
+        return tf.clip_by_value(0.5 + alpha * (images - 0.5), 0., 1.)
+
+class GammaContrast(AbstractAugment):
+
+    def __init__(self, gamma, per_channel=False, seed=1337):
+        super(GammaContrast, self).__init__(seed=seed, separable=False)
+
+        self.gamma = gamma
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        gamma = p_to_tensor(self.gamma, [tf.shape(images)[0], 1, 1, 3 if self.per_channel else 1], seed=self._gen_seed())
+
+        return tf.pow(images, gamma)
+
+class SigmoidContrast(AbstractAugment):
+
+    def __init__(self, gain, cutoff, per_channel=False, seed=1337):
+        super(SigmoidContrast, self).__init__(seed=seed, separable=False)
+
+        self.gain = gain
+        self.cutoff = cutoff
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        shape = [tf.shape(images)[0], 1, 1, 3 if self.per_channel else 1]
+
+        gain = p_to_tensor(self.gain, shape, seed=self._gen_seed())
+        cutoff = p_to_tensor(self.cutoff, shape, seed=self._gen_seed())
+
+        return 1 / (1 + tf.exp(gain * (cutoff - images)))
