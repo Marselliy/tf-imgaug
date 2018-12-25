@@ -620,13 +620,14 @@ class OneOf(SomeOf):
 
 class AbstractNoise(AbstractAugment):
 
-    def __init__(self, noise_range, p, per_channel, coarse, size_percent=0.01, seed=1337, separable=False):
+    def __init__(self, noise_range, p, per_channel, coarse, soft, size_percent=0.01, seed=1337, separable=False):
         super(AbstractNoise, self).__init__(seed=seed, separable=separable)
 
         self.noise_range = noise_range
         self.p = p
         self.per_channel = per_channel
         self.coarse = coarse
+        self.soft = soft
         self.size_percent = size_percent
 
     def _init_rng(self):
@@ -642,12 +643,14 @@ class AbstractNoise(AbstractAugment):
                 map_shape = self.last_shape
             else:
                 map_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
-            self.mask = coarse_map(p, map_shape, size_percent, seed=self._gen_seed())
+            self.mask = coarse_map(p, map_shape, size_percent, seed=self._gen_seed(), soft=self.soft)
         else:
             self.mask = tf.random_uniform(shape=noise_shape, seed=self._gen_seed()) < p
             self.mask = tf.cast(self.mask, tf.bool)
 
         self.noise = p_to_tensor(self.noise_range, noise_shape, dtype=self.last_dtype, seed=self._gen_seed())
+        if self.last_dtype == tf.float32:
+            self.noise = self.noise / 255
 
     def _augment_images(self, images):
         if self.p == 0:
@@ -658,47 +661,53 @@ class AbstractNoise(AbstractAugment):
         if not self.per_channel:
             self.mask = tf.tile(self.mask, tf.concat([[1, 1, 1], self.last_shape[-1:]], axis=0))
             self.noise = tf.tile(self.noise, tf.concat([[1, 1, 1], self.last_shape[-1:]], axis=0))
-        return tf.where(tf.cast(self.mask, tf.bool), self.noise, images)
+
+        if self.mask.dtype == tf.bool:
+            result = tf.where(self.mask, self.noise, images)
+        else:
+            result = self.mask * tf.cast(self.noise, self.mask.dtype) + (1 - self.mask) * tf.cast(images, self.mask.dtype)
+            result = tf.cast(result, images.dtype)
+        return result
 
 class Salt(AbstractNoise):
 
     def __init__(self, p=0):
-        super(Salt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=False)
+        super(Salt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=False, soft=False)
 
 class CoarseSalt(AbstractNoise):
 
-    def __init__(self, p=0, size_percent=0.01):
-        super(CoarseSalt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+    def __init__(self, p=0, size_percent=0.01, soft=False):
+        super(CoarseSalt, self).__init__(noise_range=(128, 255), p=p, per_channel=False, coarse=True, soft=soft, size_percent=size_percent)
 
 class Pepper(AbstractNoise):
 
     def __init__(self, p=0):
-        super(Pepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=False)
+        super(Pepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=False, soft=False)
 
 class CoarsePepper(AbstractNoise):
 
-    def __init__(self, p=0, size_percent=0.01):
-        super(CoarsePepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+    def __init__(self, p=0, size_percent=0.01, soft=False):
+        super(CoarsePepper, self).__init__(noise_range=(0, 128), p=p, per_channel=False, coarse=True, soft=soft, size_percent=size_percent)
 
 class SaltAndPepper(AbstractNoise):
 
     def __init__(self, p=0):
-        super(SaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=False)
+        super(SaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=False, soft=False)
 
 class CoarseSaltAndPepper(AbstractNoise):
 
-    def __init__(self, p=0, size_percent=0.01):
-        super(CoarseSaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=True, size_percent=size_percent)
+    def __init__(self, p=0, size_percent=0.01, soft=False):
+        super(CoarseSaltAndPepper, self).__init__(noise_range=(0, 255), p=p, per_channel=False, coarse=True, soft=soft, size_percent=size_percent)
 
 class Dropout(AbstractNoise):
 
     def __init__(self, p=0, per_channel=False):
-        super(Dropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=False)
+        super(Dropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=False, soft=False)
 
 class CoarseDropout(AbstractNoise):
 
-    def __init__(self, p=0, size_percent=0.01, per_channel=False):
-        super(CoarseDropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=True, size_percent=size_percent)
+    def __init__(self, p=0, size_percent=0.01, per_channel=False, soft=False):
+        super(CoarseDropout, self).__init__(noise_range=0, p=p, per_channel=per_channel, coarse=True, soft=soft, size_percent=size_percent)
 
 class JpegCompression(AbstractAugment):
 
