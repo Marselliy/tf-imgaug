@@ -43,7 +43,7 @@ class AbstractAugment:
             def _aug(e):
                 self._init_rng()
                 return (
-                    self._augment_images(e[0]), 
+                    self._augment_images(e[0]),
                     self._augment_keypoints(*e[1]),
                     self._augment_bboxes(*e[2])
                 )
@@ -159,7 +159,7 @@ class Rotate(AbstractAugment):
     def _augment_bboxes(self, bboxes, fmt='xyxy'):
         if fmt == 'xyxy':
             angles = self.angles
-            
+
             shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
 
             a = tf.cast((bboxes[..., 2] - bboxes[..., 0]) / 2, tf.float32)
@@ -185,7 +185,7 @@ class Rotate(AbstractAugment):
             return bboxes
         elif fmt == 'yxyx':
             angles = self.angles
-            
+
             shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
 
             a = tf.cast((bboxes[..., 3] - bboxes[..., 1]) / 2, tf.float32)
@@ -212,7 +212,7 @@ class Rotate(AbstractAugment):
             return bboxes
         elif fmt == 'xywh':
             angles = self.angles
-            
+
             shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
 
             a = tf.cast((bboxes[..., 2]) / 2, tf.float32)
@@ -238,7 +238,7 @@ class Rotate(AbstractAugment):
             return bboxes
         elif fmt == 'yxhw':
             angles = self.angles
-            
+
             shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
 
             a = tf.cast((bboxes[..., 3]) / 2, tf.float32)
@@ -279,7 +279,7 @@ class CropAndPad(AbstractAugment):
         if self.keep_ratio:
             crop_and_pads = p_to_tensor(self.percent, shape=(3,), dtype=tf.float32)
             crop_and_pads = tf.concat([
-                crop_and_pads, 
+                crop_and_pads,
                 tf.expand_dims(crop_and_pads[2] + crop_and_pads[0] - crop_and_pads[1], axis=0)
             ], axis=0)
         else:
@@ -601,7 +601,11 @@ class SomeOf(AbstractAugment):
                 def __aug(prev, cur_id):
                     pred_fn_pairs = _get_pred_fn_pairs(prev, cur_id)
                     return tf.case(pred_fn_pairs, exclusive=True)
-                result = tf.foldl(__aug, order, initializer=(e[0], e[1][0], e[2][0]), back_prop=False)
+
+                e_0 = tf.identity(e[0])
+                e_10 = tf.identity(e[1][0])
+                e_20 = tf.identity(e[2][0])
+                result = tf.foldl(__aug, order, initializer=(e_0, e_10, e_20), back_prop=False)
                 return result
 
             if self.separable:
