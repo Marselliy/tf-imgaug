@@ -716,7 +716,12 @@ class JpegCompression(AbstractAugment):
         else:
             min_quality, max_quality = self.quality, self.quality + 1
 
-        return tf.expand_dims(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self._gen_seed()), axis=0)
+        if all([not e.value is None for e in images.shape]):
+            shape = images.shape
+        else:
+            shape = tf.shape(images)
+        ret = tf.reshape(tf.image.random_jpeg_quality(images[0], min_quality, max_quality, seed=self._gen_seed()), shape)
+        return ret
 
 class AdditiveGaussianNoise(AbstractAugment):
 
@@ -837,7 +842,12 @@ class RandomResize(AbstractAugment):
     def _augment_images(self, images):
         size = tf.cast(p_to_tensor(self.value, (), seed=self._gen_seed()) * tf.cast(self.last_shape[1:3], tf.float32), tf.int32)
 
-        return tf.image.resize_images(tf.image.resize_images(images, size), self.last_shape[1:3])
+        if all([not e.value is None for e in images.shape]):
+            shape = images.shape
+        else:
+            shape = tf.shape(images)
+
+        return tf.reshape(tf.image.resize_images(tf.image.resize_images(images, size), self.last_shape[1:3]), shape)
 
 class LinearContrast(AbstractAugment):
 
