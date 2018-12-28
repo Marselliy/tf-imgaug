@@ -520,11 +520,6 @@ class Sometimes(AbstractAugment):
         self.false_augment._set_formats(keypoints_format, bboxes_format)
 
     def __call__(self, images, keypoints, bboxes):
-        if not isinstance(keypoints, tuple):
-            raise ValueError('keypoints is not a tuple')
-
-        if not isinstance(bboxes, tuple):
-            raise ValueError('bboxes is not a tuple')
 
         with tf.name_scope(type(self).__name__):
 
