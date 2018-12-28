@@ -2,8 +2,10 @@ import random
 import tensorflow as tf
 
 class Sequential:
-    def __init__(self, augments, seed=random.randint(0, 2 ** 32), n_augments=1):
+    def __init__(self, augments, seed=random.randint(0, 2 ** 32), n_augments=1, keypoints_format='xy', bboxes_format='xyxy'):
         self.augments = augments
+        for aug in augments:
+            aug._set_formats(keypoints_format, bboxes_format)
         self.random = random.Random(seed)
         self.n_augments = n_augments
 
@@ -19,17 +21,8 @@ class Sequential:
                 if bboxes is None:
                     bboxes_none = True
                     bboxes = tf.zeros(tf.concat([tf.shape(images)[:1], [0, 4]], axis=0))
-                
-                if isinstance(keypoints, tuple):
-                    keypoints, keypoints_format = keypoints
-                else:
-                    keypoints_format = 'xy'
 
-                if isinstance(bboxes, tuple):
-                    bboxes, bboxes_format = bboxes
-                else:
-                    bboxes_format = 'xyxy'
-                
+
                 res = (images, keypoints, bboxes)
                 res = tuple([tf.tile(e, tf.concat([[self.n_augments], tf.ones_like(tf.shape(e)[1:], dtype=tf.int32)], axis=0)) for e in res])
 
@@ -38,7 +31,7 @@ class Sequential:
 
             for aug in self.augments:
                 aug._set_seed(self.random.randint(0, 2 ** 32))
-                res = aug(*(res[0], (res[1], keypoints_format), (res[2], bboxes_format)))
+                res = aug(*res)
 
             if images.dtype != tf.float32:
                 res = (tf.image.convert_image_dtype(res[0], images.dtype),) + res[1:]

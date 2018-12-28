@@ -16,6 +16,10 @@ class AbstractAugment:
     def _gen_seed(self):
         return self.random.randint(0, 2 ** 32)
 
+    def _set_formats(self, keypoints_format, bboxes_format):
+        self.keypoints_format = keypoints_format
+        self.bboxes_format = bboxes_format
+
     def _augment_images(self, images):
         return images
     def _augment_keypoints(self, keypoints, fmt='xy'):
@@ -31,31 +35,22 @@ class AbstractAugment:
             self.last_shape = tf.shape(images)
             self.last_dtype = images.dtype
 
-            if not isinstance(keypoints, tuple):
-                raise ValueError('keypoints is not a tuple')
-
-            if not isinstance(bboxes, tuple):
-                raise ValueError('bboxes is not a tuple')
-
-            keypoints, keypoints_fmt = keypoints
-            bboxes, bboxes_fmt = bboxes
-
             def _aug(e):
                 self._init_rng()
                 return (
                     self._augment_images(e[0]),
-                    self._augment_keypoints(*e[1]),
-                    self._augment_bboxes(*e[2])
+                    self._augment_keypoints(e[1]),
+                    self._augment_bboxes(e[2])
                 )
 
             if self.separable:
                 def wrapper(args):
-                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+                    return _aug(args)
 
                 images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-                return images_aug[:, 0], (keypoints_aug[:, 0], keypoints_fmt), (bboxes_aug[:, 0], bboxes_fmt)
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
             else:
-                images_aug, keypoints_aug, bboxes_aug = _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                images_aug, keypoints_aug, bboxes_aug = _aug((images, keypoints, bboxes))
                 return images_aug, keypoints_aug, bboxes_aug
 
 class Noop(AbstractAugment):
@@ -66,10 +61,10 @@ class Noop(AbstractAugment):
     def _augment_images(self, images):
         return images
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
+    def _augment_keypoints(self, keypoints):
         return keypoints
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
+    def _augment_bboxes(self, bboxes):
         return bboxes
 
 class Translate(AbstractAugment):
@@ -92,22 +87,22 @@ class Translate(AbstractAugment):
     def _augment_images(self, images):
         return tf.contrib.image.translate(images, self.translations_xy, self.interpolation)
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
-        if fmt == 'xy':
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
             return keypoints + tf.expand_dims(self.translations_xy, axis=1)
-        elif fmt == 'yx':
+        elif self.keypoints_format == 'yx':
             return keypoints + tf.expand_dims(self.translations_yx, axis=1)
         else:
             raise ValueError('Unsupported keypoints format: %s' % fmt)
 
     def _augment_bboxes(self, bboxes, fmt='xyxy'):
-        if fmt == 'xyxy':
+        if self.bboxes_format == 'xyxy':
             return bboxes + tf.expand_dims(tf.tile(self.translations_xy, [1, 2]), axis=1)
-        elif fmt == 'yxyx':
+        elif self.bboxes_format == 'yxyx':
             return bboxes + tf.expand_dims(tf.tile(self.translations_yx, [1, 2]), axis=1)
-        elif fmt == 'xywh':
+        elif self.bboxes_format == 'xywh':
             return bboxes + tf.expand_dims(tf.concat([self.translations_xy, tf.zeros_like(self.translations_xy)], axis=-1), axis=1)
-        elif fmt == 'yxhw':
+        elif self.bboxes_format == 'yxhw':
             return bboxes + tf.expand_dims(tf.concat([self.translations_yx, tf.zeros_like(self.translations_yx)], axis=-1), axis=1)
         else:
             raise ValueError('Unsupported bboxes format: %s' % fmt)
@@ -126,8 +121,8 @@ class Rotate(AbstractAugment):
     def _augment_images(self, images):
         return tf.contrib.image.rotate(images, self.angles, self.interpolation)
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
-        if fmt == 'xy':
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
             angles = self.angles
             angles = tf.expand_dims(-angles, axis=1)
 
@@ -140,7 +135,7 @@ class Rotate(AbstractAugment):
             ], axis=-1) + (shape / 2)
 
             return keypoints
-        elif fmt == 'yx':
+        elif self.keypoints_format == 'yx':
             angles = self.angles
             angles = tf.expand_dims(-angles, axis=1)
 
@@ -156,8 +151,8 @@ class Rotate(AbstractAugment):
         else:
             raise ValueError('Unsupported keypoints format: %s' % fmt)
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
-        if fmt == 'xyxy':
+    def _augment_bboxes(self, bboxes):
+        if self.bboxes_format == 'xyxy':
             angles = self.angles
 
             shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
@@ -183,7 +178,7 @@ class Rotate(AbstractAugment):
                 c_y + b,
             ], axis=-1)
             return bboxes
-        elif fmt == 'yxyx':
+        elif self.bboxes_format == 'yxyx':
             angles = self.angles
 
             shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
@@ -210,7 +205,7 @@ class Rotate(AbstractAugment):
                 c_x + a,
             ], axis=-1)
             return bboxes
-        elif fmt == 'xywh':
+        elif self.bboxes_format == 'xywh':
             angles = self.angles
 
             shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
@@ -236,7 +231,7 @@ class Rotate(AbstractAugment):
                 b * 2,
             ], axis=-1)
             return bboxes
-        elif fmt == 'yxhw':
+        elif self.bboxes_format == 'yxhw':
             angles = self.angles
 
             shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
@@ -313,8 +308,8 @@ class CropAndPad(AbstractAugment):
 
         return tf.image.convert_image_dtype(resized, dtype)
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
-        if fmt == 'xy':
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
             crop_and_pads = tf.cast([self.crop_and_pads[1], self.crop_and_pads[0], self.crop_and_pads[3], self.crop_and_pads[2]], tf.float32)
             _shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -322,7 +317,7 @@ class CropAndPad(AbstractAugment):
             keypoints = (keypoints + shift) / scale
 
             return keypoints
-        elif fmt == 'yx':
+        elif self.keypoints_format == 'yx':
             crop_and_pads = tf.cast([self.crop_and_pads[0], self.crop_and_pads[1], self.crop_and_pads[2], self.crop_and_pads[3]], tf.float32)
             _shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -334,7 +329,7 @@ class CropAndPad(AbstractAugment):
             raise ValueError('Unsupported keypoints format: %s' % fmt)
 
     def _augment_bboxes(self, bboxes, fmt='xyxy'):
-        if fmt == 'xyxy':
+        if self.bboxes_format == 'xyxy':
             crop_and_pads = tf.cast([self.crop_and_pads[1], self.crop_and_pads[0], self.crop_and_pads[3], self.crop_and_pads[2]], tf.float32)
             _shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -342,7 +337,7 @@ class CropAndPad(AbstractAugment):
             bboxes = (bboxes + tf.tile(shift, (1, 1, 2))) / tf.tile(scale, (1, 1, 2))
 
             return bboxes
-        elif fmt == 'yxyx':
+        elif self.bboxes_format == 'yxyx':
             crop_and_pads = tf.cast([self.crop_and_pads[0], self.crop_and_pads[1], self.crop_and_pads[2], self.crop_and_pads[3]], tf.float32)
             _shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -350,7 +345,7 @@ class CropAndPad(AbstractAugment):
             bboxes = (bboxes + tf.tile(shift, (1, 1, 2))) / tf.tile(scale, (1, 1, 2))
 
             return bboxes
-        elif fmt == 'xywh':
+        elif self.bboxes_format == 'xywh':
             crop_and_pads = tf.cast([self.crop_and_pads[1], self.crop_and_pads[0], self.crop_and_pads[3], self.crop_and_pads[2]], tf.float32)
             _shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -358,7 +353,7 @@ class CropAndPad(AbstractAugment):
             bboxes = (bboxes + tf.concat([shift, tf.zeros_like(shift)], axis=-1)) / tf.tile(scale, (1, 1, 2))
 
             return bboxes
-        elif fmt == 'yxhw':
+        elif self.bboxes_format == 'yxhw':
             crop_and_pads = tf.cast([self.crop_and_pads[0], self.crop_and_pads[1], self.crop_and_pads[2], self.crop_and_pads[3]], tf.float32)
             _shape = tf.cast([self.last_shape[1], self.last_shape[2]], tf.float32)
             shift = tf.reshape(crop_and_pads[:2], (1, 1, 2))
@@ -385,15 +380,15 @@ class Fliplr(AbstractAugment):
             lambda: images
         )
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
-        if fmt == 'xy':
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([w - keypoints[..., 0], keypoints[..., 1]], axis=-1),
                 lambda: keypoints
             )
-        elif fmt == 'yx':
+        elif self.keypoints_format == 'yx':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
@@ -403,29 +398,29 @@ class Fliplr(AbstractAugment):
         else:
             raise ValueError('Unsupported keypoints format: %s' % fmt)
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
-        if fmt == 'xyxy':
+    def _augment_bboxes(self, bboxes):
+        if self.bboxes_format == 'xyxy':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([w - bboxes[..., 2], bboxes[..., 1], w - bboxes[..., 0], bboxes[..., 3]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'yxyx':
+        elif self.bboxes_format == 'yxyx':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([bboxes[..., 0], w - bboxes[..., 3], bboxes[..., 2], w - bboxes[..., 1]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'xywh':
+        elif self.bboxes_format == 'xywh':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([w - bboxes[..., 0] - bboxes[..., 2], bboxes[..., 1], bboxes[..., 2], bboxes[..., 3]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'yxhw':
+        elif self.bboxes_format == 'yxhw':
             w = tf.cast(self.last_shape[2], tf.float32)
             return tf.cond(
                 self.flip,
@@ -451,15 +446,15 @@ class Flipud(AbstractAugment):
             lambda: images
         )
 
-    def _augment_keypoints(self, keypoints, fmt='xy'):
-        if fmt == 'xy':
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([keypoints[..., 0], h - keypoints[..., 1]], axis=-1),
                 lambda: keypoints
             )
-        elif fmt == 'yx':
+        elif self.keypoints_format == 'yx':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
@@ -469,29 +464,29 @@ class Flipud(AbstractAugment):
         else:
             raise ValueError('Unsupported keypoints format: %s' % fmt)
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
-        if fmt == 'xyxy':
+    def _augment_bboxes(self, bboxes):
+        if self.bboxes_format == 'xyxy':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([bboxes[..., 0], h - bboxes[..., 3], bboxes[..., 2], h - bboxes[..., 1]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'yxyx':
+        elif self.bboxes_format == 'yxyx':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([h - bboxes[..., 2], bboxes[..., 1], h - bboxes[..., 0], bboxes[..., 3]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'xywh':
+        elif self.bboxes_format == 'xywh':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
                 lambda: tf.stack([bboxes[..., 0], h - bboxes[..., 1] - bboxes[..., 3], bboxes[..., 2], bboxes[..., 3]], axis=-1),
                 lambda: bboxes
             )
-        elif fmt == 'yxhw':
+        elif self.bboxes_format == 'yxhw':
             h = tf.cast(self.last_shape[1], tf.float32)
             return tf.cond(
                 self.flip,
@@ -518,6 +513,12 @@ class Sometimes(AbstractAugment):
     def _init_rng(self):
         self.flag = tf.random_uniform((), seed=self._gen_seed()) < self.p
 
+    def _set_formats(self, keypoints_format, bboxes_format):
+        self.keypoints_format = keypoints_format
+        self.bboxes_format = bboxes_format
+        self.true_augment._set_formats(keypoints_format, bboxes_format)
+        self.false_augment._set_formats(keypoints_format, bboxes_format)
+
     def __call__(self, images, keypoints, bboxes):
         if not isinstance(keypoints, tuple):
             raise ValueError('keypoints is not a tuple')
@@ -526,8 +527,6 @@ class Sometimes(AbstractAugment):
             raise ValueError('bboxes is not a tuple')
 
         with tf.name_scope(type(self).__name__):
-            keypoints, keypoints_fmt = keypoints
-            bboxes, bboxes_fmt = bboxes
 
             def _aug(e):
                 self._init_rng()
@@ -539,12 +538,12 @@ class Sometimes(AbstractAugment):
 
             if self.separable:
                 def wrapper(args):
-                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+                    return _aug(args)
 
                 images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
                 return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
             else:
-                return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                return _aug((images, keypoints, bboxes))
 
 class SomeOf(AbstractAugment):
 
@@ -573,16 +572,15 @@ class SomeOf(AbstractAugment):
         self.probs = tf.random_uniform((len(self.children_augments),), seed=self._gen_seed())
         self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
 
-    def __call__(self, images, keypoints, bboxes):
-        if not isinstance(keypoints, tuple):
-            raise ValueError('keypoints is not a tuple')
+    def _set_formats(self, keypoints_format, bboxes_format):
+        self.keypoints_format = keypoints_format
+        self.bboxes_format = bboxes_format
+        for aug in self.children_augments:
+            aug._set_formats(keypoints_format, bboxes_format)
 
-        if not isinstance(bboxes, tuple):
-            raise ValueError('bboxes is not a tuple')
+    def __call__(self, images, keypoints, bboxes):
 
         with tf.name_scope(type(self).__name__):
-            keypoints, keypoints_fmt = keypoints
-            bboxes, bboxes_fmt = bboxes
             def _aug(e):
                 self._init_rng()
                 num = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
@@ -593,7 +591,7 @@ class SomeOf(AbstractAugment):
                 def _get_pred_fn_pairs(prev, cur_id):
                     def _(inp, aug):
                         def __():
-                            return aug(inp[0], (inp[1], keypoints_fmt), (inp[2], bboxes_fmt))
+                            return aug(*inp)
                         return __
 
                     return {tf.equal(cur_id, i): _(prev, aug) for i, aug in enumerate(self.children_augments)}
@@ -602,20 +600,18 @@ class SomeOf(AbstractAugment):
                     pred_fn_pairs = _get_pred_fn_pairs(prev, cur_id)
                     return tf.case(pred_fn_pairs, exclusive=True)
 
-                e_0 = tf.identity(e[0])
-                e_10 = tf.identity(e[1][0])
-                e_20 = tf.identity(e[2][0])
-                result = tf.foldl(__aug, order, initializer=(e_0, e_10, e_20), back_prop=False)
+                init = tuple([tf.identity(t) for t in e])
+                result = tf.foldl(__aug, order, initializer=init, back_prop=False)
                 return result
 
             if self.separable:
                 def wrapper(args):
-                    return _aug((args[0], (args[1], keypoints_fmt), (args[2], bboxes_fmt)))
+                    return _aug(args)
 
                 images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
                 return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
             else:
-                return _aug((images, (keypoints, keypoints_fmt), (bboxes, bboxes_fmt)))
+                return _aug((images, keypoints, bboxes))
 
 class OneOf(SomeOf):
 
