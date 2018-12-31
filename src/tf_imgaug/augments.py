@@ -22,9 +22,9 @@ class AbstractAugment:
 
     def _augment_images(self, images):
         return images
-    def _augment_keypoints(self, keypoints, fmt='xy'):
+    def _augment_keypoints(self, keypoints):
         return keypoints
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
+    def _augment_bboxes(self, bboxes):
         return bboxes
 
     def _init_rng(self):
@@ -93,9 +93,9 @@ class Translate(AbstractAugment):
         elif self.keypoints_format == 'yx':
             return keypoints + tf.expand_dims(self.translations_yx, axis=1)
         else:
-            raise ValueError('Unsupported keypoints format: %s' % fmt)
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
+    def _augment_bboxes(self, bboxes):
         if self.bboxes_format == 'xyxy':
             return bboxes + tf.expand_dims(tf.tile(self.translations_xy, [1, 2]), axis=1)
         elif self.bboxes_format == 'yxyx':
@@ -105,7 +105,7 @@ class Translate(AbstractAugment):
         elif self.bboxes_format == 'yxhw':
             return bboxes + tf.expand_dims(tf.concat([self.translations_yx, tf.zeros_like(self.translations_yx)], axis=-1), axis=1)
         else:
-            raise ValueError('Unsupported bboxes format: %s' % fmt)
+            raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
 
 class Rotate(AbstractAugment):
@@ -149,7 +149,7 @@ class Rotate(AbstractAugment):
 
             return keypoints
         else:
-            raise ValueError('Unsupported keypoints format: %s' % fmt)
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
 
     def _augment_bboxes(self, bboxes):
         if self.bboxes_format == 'xyxy':
@@ -259,7 +259,7 @@ class Rotate(AbstractAugment):
             ], axis=-1)
             return bboxes
         else:
-            raise ValueError('Unsupported bboxes format: %s' % fmt)
+            raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
 class CropAndPad(AbstractAugment):
 
@@ -326,9 +326,9 @@ class CropAndPad(AbstractAugment):
 
             return keypoints
         else:
-            raise ValueError('Unsupported keypoints format: %s' % fmt)
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
 
-    def _augment_bboxes(self, bboxes, fmt='xyxy'):
+    def _augment_bboxes(self, bboxes):
         if self.bboxes_format == 'xyxy':
             crop_and_pads = tf.cast([self.crop_and_pads[1], self.crop_and_pads[0], self.crop_and_pads[3], self.crop_and_pads[2]], tf.float32)
             _shape = tf.cast([self.last_shape[2], self.last_shape[1]], tf.float32)
@@ -362,7 +362,7 @@ class CropAndPad(AbstractAugment):
 
             return bboxes
         else:
-            raise ValueError('Unsupported bboxes format: %s' % fmt)
+            raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
 class Fliplr(AbstractAugment):
 
@@ -396,7 +396,7 @@ class Fliplr(AbstractAugment):
                 lambda: keypoints
             )
         else:
-            raise ValueError('Unsupported keypoints format: %s' % fmt)
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
 
     def _augment_bboxes(self, bboxes):
         if self.bboxes_format == 'xyxy':
@@ -428,7 +428,7 @@ class Fliplr(AbstractAugment):
                 lambda: bboxes
             )
         else:
-            raise ValueError('Unsupported bboxes format: %s' % fmt)
+            raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
 class Flipud(AbstractAugment):
 
@@ -462,7 +462,7 @@ class Flipud(AbstractAugment):
                 lambda: keypoints
             )
         else:
-            raise ValueError('Unsupported keypoints format: %s' % fmt)
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
 
     def _augment_bboxes(self, bboxes):
         if self.bboxes_format == 'xyxy':
@@ -494,7 +494,7 @@ class Flipud(AbstractAugment):
                 lambda: bboxes
             )
         else:
-            raise ValueError('Unsupported bboxes format: %s' % fmt)
+            raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
 class ElasticTransform(AbstractAugment):
 
