@@ -496,6 +496,160 @@ class Flipud(AbstractAugment):
         else:
             raise ValueError('Unsupported bboxes format: %s' % fmt)
 
+class ElasticTransform(AbstractAugment):
+
+    def __init__(self, displacement_stddev=0.01):
+        super(ElasticTransform, self).__init__()
+        self.displacement_stddev = displacement_stddev
+
+    def _init_rng(self):
+        displacement_stddevs = p_to_tensor(self.displacement_stddev, (1,), seed=self._gen_seed()) * tf.reduce_mean(tf.cast(self.last_shape[1:3], tf.float32))
+
+        self.displacement_field = tf.random_normal(
+            [1, self.last_shape[1], self.last_shape[2], 2],
+            stddev=displacement_stddevs
+        )
+        self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
+
+    def _augment_images(self, images):
+        if any([e.value is None for e in images.shape]):
+            raise ValueError('Images shape must be defined. Got %s' % str(images.shape))
+
+        ret = tf.contrib.image.dense_image_warp(
+            images,
+            self.displacement_field
+        )
+        return ret
+
+class ElasticWarp(AbstractAugment):
+
+    def __init__(self, grid_size=4, displacement_stddev=0.05, interpolation='bicubic'):
+        super(ElasticWarp, self).__init__()
+        self.grid_size = grid_size
+        self.displacement_stddev = displacement_stddev
+        self.interpolation = interpolation
+
+    def _init_rng(self):
+        grid_sizes = p_to_tensor(self.grid_size, (2,), dtype=tf.int32, seed=self._gen_seed())
+        displacement_stddevs = p_to_tensor(self.displacement_stddev, (1,), seed=self._gen_seed()) * tf.reduce_mean(tf.cast(self.last_shape[1:3], tf.float32))
+
+        self.displacement_field_small = tf.random_normal(
+            tf.stack([self.last_shape[0], grid_sizes[0], grid_sizes[1], 2], axis=0),
+            stddev=displacement_stddevs
+        )
+
+        if self.interpolation == 'nearest_neighbor':
+            resize = tf.image.resize_nearest_neighbor
+        elif self.interpolation == 'bilinear':
+            resize = tf.image.resize_bilinear
+        elif self.interpolation == 'bicubic':
+            resize = tf.image.resize_bicubic
+        else:
+            raise ValueError('Unknown interpolation: %s' % self.interpolation)
+
+        self.displacement_field = resize(self.displacement_field_small, self.last_shape[1:3])
+        self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
+
+    def _augment_images(self, images):
+        if any([e.value is None for e in images.shape]):
+            raise ValueError('Images shape must be defined. Got %s' % str(images.shape))
+
+        ret = tf.contrib.image.dense_image_warp(
+            images,
+            self.displacement_field
+        )
+        return ret
+
+    def _augment_keypoints(self, keypoints):
+        if self.keypoints_format == 'xy':
+            keypoints = keypoints[..., ::-1]
+        elif self.keypoints_format == 'yx':
+            pass
+        else:
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
+
+        idx = tf.stack(tf.meshgrid(tf.range(self.last_shape[1]), tf.range(self.last_shape[2]))[::-1], axis=2)
+        idx = tf.tile(tf.expand_dims(idx, axis=0), [self.last_shape[0], 1, 1, 1])
+        pre_idx = tf.cast(idx, self.displacement_field.dtype) - self.displacement_field
+
+        pre_idx = tf.reshape(pre_idx, (tf.shape(keypoints)[0], 1, -1, 2))
+        keypoints = tf.expand_dims(keypoints, axis=2)
+        dists = tf.reduce_sum(tf.abs(pre_idx - keypoints), axis=-1)
+        coords = tf.cast(tf.argmin(dists, axis=2), tf.int32)
+        xs = coords % self.last_shape[2]
+        ys = coords // self.last_shape[2]
+
+        if self.keypoints_format == 'xy':
+            ax_order = [xs, ys]
+        elif self.keypoints_format == 'yx':
+            ax_order = [ys, xs]
+        return tf.cast(tf.stack(ax_order, axis=2), keypoints.dtype)
+
+    def _augment_bboxes(self, bboxes):
+        ANCHORS_PER_EDGE = 1
+        alphas = tf.linspace(0., 1., ANCHORS_PER_EDGE + 2)[:-1]
+        anchors = tf.concat([
+            tf.stack([alphas, tf.zeros_like(alphas)], axis=1),
+            tf.stack([tf.ones_like(alphas), alphas], axis=1),
+            tf.stack([1 - alphas, tf.ones_like(alphas)], axis=1),
+            tf.stack([tf.zeros_like(alphas), (1 - alphas)], axis=1)
+        ], axis=0)
+
+        anchors = tf.expand_dims(tf.expand_dims(anchors, axis=0), axis=0)
+
+        if self.bboxes_format == 'xyxy':
+            l, t, r, b = [bboxes[..., e:(e + 1)] for e in range(4)]
+        elif self.bboxes_format == 'yxyx':
+            t, l, b, r = [bboxes[..., e:(e + 1)] for e in range(4)]
+        elif self.bboxes_format == 'xywh':
+            l, t, w, h = [bboxes[..., e:(e + 1)] for e in range(4)]
+            r, b = l + w, t + h
+        elif self.bboxes_format == 'yxhw':
+            t, l, h, w = [bboxes[..., e:(e + 1)] for e in range(4)]
+            r, b = l + w, t + h
+        else:
+            raise ValueError('Unsupported bboxes format: %s' % self.keypoints_format)
+
+        xs = (l * anchors[..., 0] + r * (1 - anchors[..., 0]))
+        ys = (t * anchors[..., 1] + b * (1 - anchors[..., 1]))
+
+        if self.keypoints_format == 'xy':
+            order = [xs, ys]
+        elif self.keypoints_format == 'yx':
+            order = [ys, xs]
+        else:
+            raise ValueError('Unsupported keypoints format: %s' % self.keypoints_format)
+
+        anchor_points = tf.stack(order, axis=3)
+        anchor_points_r = tf.reshape(anchor_points, (tf.shape(bboxes)[0], -1, 2))
+        anchor_points_r = self._augment_keypoints(anchor_points_r)
+        anchor_points_d = tf.reshape(anchor_points_r, tf.shape(anchor_points))
+
+        if self.keypoints_format == 'xy':
+            xs, ys = anchor_points_d[..., 0], anchor_points_d[..., 1]
+        elif self.keypoints_format == 'yx':
+            xs, ys = anchor_points_d[..., 1], anchor_points_d[..., 0]
+
+        l, t, r, b = (
+            tf.reduce_min(xs, axis=2),
+            tf.reduce_min(ys, axis=2),
+            tf.reduce_max(xs, axis=2),
+            tf.reduce_max(ys, axis=2)
+        )
+
+        if self.bboxes_format == 'xyxy':
+            return tf.stack([l, t, r, b], axis=2)
+        elif self.bboxes_format == 'yxyx':
+            return tf.stack([t, l, b, r], axis=2)
+        elif self.bboxes_format == 'xywh':
+            w, h = r - l, b - t
+            return tf.stack([l, t, w, h], axis=2)
+        elif self.bboxes_format == 'yxhw':
+            w, h = r - l, b - t
+            return tf.stack([t, l, h, w], axis=2)
+        else:
+            raise ValueError('Unsupported bboxes format: %s' % self.keypoints_format)
+
 
 class Sometimes(AbstractAugment):
 

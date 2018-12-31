@@ -96,6 +96,12 @@ class TestAugments(unittest.TestCase):
     def test_sigmoidcontrast(self):
         self._abstract_shape_test(SigmoidContrast(2, 10))
 
+    def test_elastictransform(self):
+        self._abstract_shape_test(ElasticTransform((0.001, 0.1)))
+
+    def test_elasticwarp(self):
+        self._abstract_shape_test(ElasticWarp((2, 5), (0.01, 0.06), 'bicubic'))
+
     def test_hard(self):
 
         aug = [
