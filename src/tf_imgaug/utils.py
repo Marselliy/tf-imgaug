@@ -7,7 +7,7 @@ def p_to_tensor(p, shape, dtype=tf.float32, seed=1337):
         return tf.random_uniform(shape=shape, dtype=dtype, minval=p[0], maxval=p[1], seed=seed)
     elif type(p) == list and len(p) != 1:
         logits = tf.random_uniform([1, len(p)], seed=seed)
-        samples = tf.multinomial(tf.log(logits), tf.reduce_prod(shape))
+        samples = tf.multinomial(tf.log(logits), tf.reduce_prod(shape) if len(shape) > 0 else 1)
         return tf.reshape(tf.gather(tf.convert_to_tensor(p, dtype=dtype), samples[0]), shape)
     else:
         if hasattr(p, '__getitem__'):

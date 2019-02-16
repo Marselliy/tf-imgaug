@@ -1059,3 +1059,50 @@ class SigmoidContrast(AbstractAugment):
         cutoff = p_to_tensor(self.cutoff, shape, seed=self._gen_seed())
 
         return 1 / (1 + tf.exp(gain * (cutoff - images)))
+
+class DenormalizeColors(AbstractAugment):
+
+    def __init__(self, points, stddev, per_channel=False, seed=1337):
+        super(DenormalizeColors, self).__init__(seed=seed, separable=True)
+
+        self.points = points
+        self.stddev = stddev
+        self.per_channel = per_channel
+
+    def _augment_images(self, images):
+        points =  p_to_tensor(self.points, (), dtype=tf.int32, seed=self._gen_seed())
+        stddev =  p_to_tensor(self.stddev, (), dtype=tf.float32, seed=self._gen_seed())
+        if images.shape[0] is None:
+            shape = tf.shape(images)[0]
+        else:
+            shape = int(images.shape[0])
+        shape = tf.concat([[shape], tf.shape(images)[1:]], axis=0)
+
+        if self.per_channel:
+            x = tf.reshape(tf.transpose(images, (0, 3, 1, 2)), (shape[0] * shape[-1], -1))
+        else:
+            x = tf.reshape(images, (shape[0], -1))
+
+        pts_x = tf.concat([
+            tf.zeros(shape=(tf.shape(x)[0], 1)),
+            tf.random_uniform(shape=(tf.shape(x)[0], points - 2), seed=self._gen_seed()),
+            tf.ones(shape=(tf.shape(x)[0], 1)),
+        ], axis=1)
+        pts_y = pts_x + tf.random_normal(stddev=stddev, shape=(tf.shape(x)[0], points), seed=self._gen_seed())
+        pts_y = tf.clip_by_value(pts_y, 0, 1)
+        train_points = tf.stack([pts_x, pts_y], axis=2)
+        train_points, train_values = train_points[..., :1], train_points[..., 1:]
+        query_points = tf.expand_dims(x, axis=2)
+
+        query_values = tf.contrib.image.interpolate_spline(
+            train_points=train_points,
+            train_values=train_values,
+            query_points=query_points,
+            order=1
+        )
+
+        if self.per_channel:
+            query_values = tf.transpose(tf.reshape(query_values, tf.gather(shape, [0, 3, 1, 2])), (0, 2, 3, 1))
+        images_aug = tf.reshape(query_values, shape)
+
+        return images_aug
