@@ -1106,3 +1106,12 @@ class DenormalizeColors(AbstractAugment):
         images_aug = tf.reshape(query_values, shape)
 
         return images_aug
+
+class AddHue(AbstractAugment):
+
+    def __init__(self, max_delta, seed=1337):
+        super(AddHue, self).__init__(seed=seed, separable=True)
+        self.max_delta = max_delta
+
+    def _augment_images(self, images):
+        return tf.image.random_hue(images, self.max_delta)
