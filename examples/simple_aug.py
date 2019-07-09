@@ -21,30 +21,39 @@ seq = Sequential([
         [
             Fliplr(1),
             Flipud(1),
-            Rotate((-30, 30)),
+            Rotate((-40, 40)),
             CropAndPad((-0.3, 0.3), pad_cval=(0, 255)),
-            Translate(dict(x=(-0.2, 0.2), y=(-0.3, 0.3)))
+            Translate(dict(x=(-0.2, 0.2), y=(-0.2, 0.2)))
         ]
     ),
-    OneOf(
+    SomeOf(
+        (0, 3),
         [
-            Salt(p=(0, 0.2)),
-            Pepper(p=(0, 0.2)),
-            Dropout(p=(0.3, 0.5))
+            Salt(p=(0, 0.25)),
+            Pepper(p=(0, 0.25)),
+            CoarseDropout(0.25, size_percent=(0.03, 0.15)),
+            #AdditiveGaussianNoise((0.05, 0.2), per_channel=True),
+            Sometimes(0.5,
+                Add(value=(-0.3, 0.3)),
+                Multiply(value=(0.5, 2.0)),
+            ),
+            Grayscale(p=(0, 1))
         ]
     ),
-    JpegCompression(quality=5)
+    AdditiveGaussianNoise((0.05, 0.2), per_channel=True),
+    Sometimes(0.5, RandomResize(size_percent=(0.3, 0.8))),
+    Sometimes(0.5, JpegCompression(quality=(5, 80)))
 ], n_augments=N_AUGMENTS)
-
 
 images_ph = tf.placeholder(tf.uint8, (None, None, None, 3))
 keypoints_ph = tf.placeholder(tf.float32, (None, None, 2))
 bboxes_ph = tf.placeholder(tf.float32, (None, None, 4))
-_images_aug, _keypoints_aug, _bboxes_aug = seq(images=images_ph, keypoints=keypoints_ph, bboxes=bboxes_ph)
+segmaps_ph = tf.placeholder(tf.uint8, (None, None, None, 2))
+_images_aug, _keypoints_aug, _bboxes_aug, _segmaps_aug = seq(images=images_ph, keypoints=keypoints_ph, bboxes=bboxes_ph, segmaps=segmaps_ph)
 
 img = np.random.randint(low=0, high=50, size=(256, 256, 3), dtype=np.uint8)
 cv2.circle(img, (128, 200), 30, (255, 0, 0), thickness=-1)
-img[50:100, 150:200, 0] = 255
+img[50:100, 150:200, 1] = 255
 kpts = np.array([[
     [150, 50],
     [150, 100],
@@ -56,20 +65,24 @@ bbxs = np.array([
         [95, 170, 160, 230]
     ]
 ])
-
+segmap = img[..., 0] != 255
+segmap = np.stack([
+    img[..., 0] == 255,
+    img[..., 1] == 255
+], axis=-1)
 
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    images, images_aug, keypoints, keypoints_aug, bboxes, bboxes_aug = sess.run([
-        images_ph, _images_aug, keypoints_ph, _keypoints_aug, bboxes_ph, _bboxes_aug
+    images, images_aug, keypoints, keypoints_aug, bboxes, bboxes_aug, segmaps, segmaps_aug = sess.run([
+        images_ph, _images_aug, keypoints_ph, _keypoints_aug, bboxes_ph, _bboxes_aug, segmaps_ph, _segmaps_aug
     ],
         feed_dict={
             images_ph: [img],
             keypoints_ph: kpts,
-            bboxes_ph: bbxs
+            bboxes_ph: bbxs,
+            segmaps_ph: [segmap]
         }
     )
-
     start = time.time()
     for i in range(SPEED_TEST_ITERATIONS):
         sess.run(_images_aug,
