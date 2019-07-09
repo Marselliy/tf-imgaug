@@ -298,7 +298,7 @@ class CropAndPad(AbstractAugment):
         pad_cval = p_to_tensor(self.pad_cval, (), dtype=images.dtype)
         images = tf.pad(images, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=pad_cval)
 
-        resized = tf.image.resize_images(
+        resized = tf.image.resize(
             images,
             self.last_shape[1:3]
         )
@@ -379,7 +379,7 @@ class CropAndPad(AbstractAugment):
         pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
         segmaps = tf.pad(segmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
 
-        resized = tf.image.resize_images(
+        resized = tf.image.resize(
             segmaps,
             self.last_shape[1:3]
         )
@@ -545,7 +545,7 @@ class ElasticTransform(AbstractAugment):
     def _init_rng(self):
         displacement_stddevs = p_to_tensor(self.displacement_stddev, (1,), seed=self._gen_seed()) * tf.reduce_mean(tf.cast(self.last_shape[1:3], tf.float32))
 
-        self.displacement_field = tf.random_normal(
+        self.displacement_field = tf.random.normal(
             [1, self.last_shape[1], self.last_shape[2], 2],
             stddev=displacement_stddevs
         )
@@ -573,21 +573,21 @@ class ElasticWarp(AbstractAugment):
         grid_sizes = p_to_tensor(self.grid_size, (2,), dtype=tf.int32, seed=self._gen_seed())
         displacement_stddevs = p_to_tensor(self.displacement_stddev, (1,), seed=self._gen_seed()) * tf.reduce_mean(tf.cast(self.last_shape[1:3], tf.float32))
 
-        self.displacement_field_small = tf.random_normal(
+        self.displacement_field_small = tf.random.normal(
             tf.stack([self.last_shape[0], grid_sizes[0], grid_sizes[1], 2], axis=0),
             stddev=displacement_stddevs
         )
 
         if self.interpolation == 'nearest_neighbor':
-            resize = tf.image.resize_nearest_neighbor
+            method = tf.image.ResizeMethod.NEAREST_NEIGHBOR
         elif self.interpolation == 'bilinear':
-            resize = tf.image.resize_bilinear
+            method = tf.image.ResizeMethod.BILINEAR
         elif self.interpolation == 'bicubic':
-            resize = tf.image.resize_bicubic
+            method = tf.image.ResizeMethod.BICUBIC
         else:
             raise ValueError('Unknown interpolation: %s' % self.interpolation)
 
-        self.displacement_field = resize(self.displacement_field_small, self.last_shape[1:3])
+        self.displacement_field = tf.image.resize(self.displacement_field_small, self.last_shape[1:3], method=method)
         self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
 
     def _augment_images(self, images):
@@ -768,8 +768,8 @@ class SomeOf(AbstractAugment):
         self.random_order = random_order
 
     def _init_rng(self):
-        self.probs = tf.random_uniform((len(self.children_augments),), seed=self._gen_seed())
-        self.count = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
+        self.probs = tf.random.uniform((len(self.children_augments),), seed=self._gen_seed())
+        self.count = tf.random.uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
 
     def _set_formats(self, keypoints_format, bboxes_format):
         self.keypoints_format = keypoints_format
@@ -783,7 +783,7 @@ class SomeOf(AbstractAugment):
             def _aug(e):
                 self._init_rng()
                 num = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
-                order = tf.random_shuffle(tf.range(len(self.children_augments)), seed=self._gen_seed())[:num]
+                order = tf.random.shuffle(tf.range(len(self.children_augments)), seed=self._gen_seed())[:num]
                 if not self.random_order:
                     order = tf.nn.top_k(order, k=num)[0][::-1]
 
@@ -944,7 +944,7 @@ class AdditiveGaussianNoise(AbstractAugment):
         else:
             noise_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
 
-        res = tf.image.convert_image_dtype(tf.clip_by_value(images_float + tf.random_normal(noise_shape, seed=self._gen_seed()) * scale, 0, 1), images.dtype)
+        res = tf.image.convert_image_dtype(tf.clip_by_value(images_float + tf.random.normal(noise_shape, seed=self._gen_seed()) * scale, 0, 1), images.dtype)
         if res.dtype != images.dtype:
             res = tf.image.convert_image_dtype(res, images.dtype)
         return res
@@ -1051,7 +1051,7 @@ class RandomResize(AbstractAugment):
         else:
             shape = tf.shape(images)
 
-        return tf.reshape(tf.image.resize_images(tf.image.resize_images(images, size), self.last_shape[1:3]), shape)
+        return tf.reshape(tf.image.resize(tf.image.resize(images, size), self.last_shape[1:3]), shape)
 
 class LinearContrast(AbstractAugment):
 

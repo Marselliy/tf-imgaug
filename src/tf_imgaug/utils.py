@@ -21,4 +21,4 @@ def coarse_map(p, shape, size_percent, seed=1337, soft=False):
     small_map = tf.cast(tf.random_uniform(small_map_shape, dtype=tf.float32, seed=seed) < p, tf.uint8)
     if soft == True:
         return tf.clip_by_value(tf.cast(tf.image.resize_bicubic(small_map, shape[1:3]), tf.float32), 0., 1.)
-    return tf.cast(tf.image.resize_nearest_neighbor(small_map, shape[1:3]), tf.bool)
+    return tf.cast(tf.image.resize(small_map, shape[1:3], method=tf.image.ResizeMethod.NEAREST_NEIGHBOR), tf.bool)

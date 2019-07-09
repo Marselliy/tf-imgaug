@@ -18,10 +18,10 @@ class TestAugments(unittest.TestCase):
 
         tf.reset_default_graph()
 
-        img = tf.random_uniform((1, 64, 64, 3), 0., 1., dtype=tf.float32)
-        kpts = tf.random_uniform((1, 1, 2), 0., 64., dtype=tf.float32)
-        bboxes = tf.random_uniform((1, 1, 4), 0., 64., dtype=tf.float32)
-        segmaps = tf.random_uniform((1, 64, 64, 2), 0., 1., dtype=tf.float32)
+        img = tf.random.uniform((1, 64, 64, 3), 0., 1., dtype=tf.float32)
+        kpts = tf.random.uniform((1, 1, 2), 0., 64., dtype=tf.float32)
+        bboxes = tf.random.uniform((1, 1, 4), 0., 64., dtype=tf.float32)
+        segmaps = tf.random.uniform((1, 64, 64, 2), 0., 1., dtype=tf.float32)
 
         if type(aug) != list:
             aug = [aug]
