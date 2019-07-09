@@ -21,14 +21,16 @@ class TestAugments(unittest.TestCase):
         img = tf.random_uniform((1, 64, 64, 3), 0., 1., dtype=tf.float32)
         kpts = tf.random_uniform((1, 1, 2), 0., 64., dtype=tf.float32)
         bboxes = tf.random_uniform((1, 1, 4), 0., 64., dtype=tf.float32)
+        segmaps = tf.random_uniform((1, 64, 64, 2), 0., 1., dtype=tf.float32)
 
         if type(aug) != list:
             aug = [aug]
-        img_aug, kpts_aug, bboxes_aug = Sequential(aug, n_augments=1)(img, kpts, bboxes)
+        img_aug, kpts_aug, bboxes_aug, segmaps_aug = Sequential(aug, n_augments=1)(img, kpts, bboxes, segmaps)
 
         self.assertEqual(img.shape, img_aug.shape)
         self.assertEqual(kpts.shape, kpts_aug.shape)
         self.assertEqual(bboxes.shape, bboxes_aug.shape)
+        self.assertEqual(segmaps.shape, segmaps_aug.shape)
 
     def test_translate(self):
         self._abstract_shape_test(Translate(dict(x=(-0.1, 0.1), y=(-0.1, 0.1))))

@@ -26,11 +26,13 @@ class AbstractAugment:
         return keypoints
     def _augment_bboxes(self, bboxes):
         return bboxes
+    def _augment_segmaps(self, segmaps):
+        return segmaps
 
     def _init_rng(self):
         pass
 
-    def __call__(self, images, keypoints, bboxes):
+    def __call__(self, images, keypoints, bboxes, segmaps):
         with tf.name_scope(type(self).__name__):
             self.last_shape = tf.shape(images)
             self.last_dtype = images.dtype
@@ -40,32 +42,25 @@ class AbstractAugment:
                 return (
                     self._augment_images(e[0]),
                     self._augment_keypoints(e[1]),
-                    self._augment_bboxes(e[2])
+                    self._augment_bboxes(e[2]),
+                    self._augment_segmaps(e[3])
                 )
 
             if self.separable:
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
             else:
-                images_aug, keypoints_aug, bboxes_aug = _aug((images, keypoints, bboxes))
-                return images_aug, keypoints_aug, bboxes_aug
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = _aug((images, keypoints, bboxes, segmaps))
+                return images_aug, keypoints_aug, bboxes_aug, segmaps_aug
 
 class Noop(AbstractAugment):
 
     def __init__(self):
         super(Noop, self).__init__(separable=False)
 
-    def _augment_images(self, images):
-        return images
-
-    def _augment_keypoints(self, keypoints):
-        return keypoints
-
-    def _augment_bboxes(self, bboxes):
-        return bboxes
 
 class Translate(AbstractAugment):
 
@@ -106,6 +101,9 @@ class Translate(AbstractAugment):
             return bboxes + tf.expand_dims(tf.concat([self.translations_yx, tf.zeros_like(self.translations_yx)], axis=-1), axis=1)
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
+
+    def _augment_segmaps(self, segmaps):
+        return tf.contrib.image.translate(segmaps, self.translations_xy, self.interpolation)
 
 
 class Rotate(AbstractAugment):
@@ -261,6 +259,9 @@ class Rotate(AbstractAugment):
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
+    def _augment_segmaps(self, segmaps):
+        return tf.contrib.image.rotate(segmaps, self.angles, self.interpolation)
+
 class CropAndPad(AbstractAugment):
 
     def __init__(self, percent, pad_cval=0, mode='CONSTANT', keep_ratio=False):
@@ -364,6 +365,31 @@ class CropAndPad(AbstractAugment):
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
+    def _augment_segmaps(self, segmaps):
+        dtype = segmaps.dtype
+        crop_and_pads = self.crop_and_pads
+        _segmaps = segmaps
+
+        crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
+        segmaps = tf.slice(
+            segmaps,
+            tf.concat([[0], -crops[:2], [0]], axis=0),
+            tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
+        )
+        pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
+        segmaps = tf.pad(segmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
+
+        resized = tf.image.resize_images(
+            segmaps,
+            self.last_shape[1:3]
+        )
+        try:
+            resized = tf.reshape(resized, [_segmaps.shape[0].value, tf.shape(_segmaps)[1], tf.shape(_segmaps)[2], _segmaps.shape[3].value])
+        except:
+            pass
+
+        return tf.image.convert_image_dtype(resized, dtype)
+
 class Fliplr(AbstractAugment):
 
     def __init__(self, p=0.5):
@@ -430,6 +456,13 @@ class Fliplr(AbstractAugment):
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
+    def _augment_segmaps(self, segmaps):
+        return tf.cond(
+            self.flip,
+            lambda: tf.image.flip_left_right(segmaps),
+            lambda: segmaps
+        )
+
 class Flipud(AbstractAugment):
 
     def __init__(self, p=0.5):
@@ -495,6 +528,13 @@ class Flipud(AbstractAugment):
             )
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
+
+    def _augment_segmaps(self, segmaps):
+        return tf.cond(
+            self.flip,
+            lambda: tf.image.flip_up_down(segmaps),
+            lambda: segmaps
+        )
 
 class ElasticTransform(AbstractAugment):
 
@@ -650,6 +690,16 @@ class ElasticWarp(AbstractAugment):
         else:
             raise ValueError('Unsupported bboxes format: %s' % self.keypoints_format)
 
+    def _augment_segmaps(self, segmaps):
+        if any([e.value is None for e in segmaps.shape]):
+            raise ValueError('Segmaps shape must be defined. Got %s' % str(segmaps.shape))
+
+        ret = tf.contrib.image.dense_image_warp(
+            segmaps,
+            self.displacement_field
+        )
+        return ret
+
 
 class Sometimes(AbstractAugment):
 
@@ -673,7 +723,7 @@ class Sometimes(AbstractAugment):
         self.true_augment._set_formats(keypoints_format, bboxes_format)
         self.false_augment._set_formats(keypoints_format, bboxes_format)
 
-    def __call__(self, images, keypoints, bboxes):
+    def __call__(self, images, keypoints, bboxes, segmaps):
 
         with tf.name_scope(type(self).__name__):
 
@@ -689,10 +739,10 @@ class Sometimes(AbstractAugment):
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
             else:
-                return _aug((images, keypoints, bboxes))
+                return _aug((images, keypoints, bboxes, segmaps))
 
 class SomeOf(AbstractAugment):
 
@@ -727,7 +777,7 @@ class SomeOf(AbstractAugment):
         for aug in self.children_augments:
             aug._set_formats(keypoints_format, bboxes_format)
 
-    def __call__(self, images, keypoints, bboxes):
+    def __call__(self, images, keypoints, bboxes, segmaps):
 
         with tf.name_scope(type(self).__name__):
             def _aug(e):
@@ -757,10 +807,10 @@ class SomeOf(AbstractAugment):
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
             else:
-                return _aug((images, keypoints, bboxes))
+                return _aug((images, keypoints, bboxes, segmaps))
 
 class OneOf(SomeOf):
 
