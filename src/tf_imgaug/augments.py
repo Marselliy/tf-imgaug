@@ -4,6 +4,12 @@ import random
 
 from .utils import p_to_tensor, coarse_map
 
+try:
+    tf_image_resize = tf.image.resize
+except:
+    tf_image_resize = tf.image.resize_images
+
+
 class AbstractAugment:
 
     def __init__(self, seed=1337, separable=True):
@@ -298,7 +304,7 @@ class CropAndPad(AbstractAugment):
         pad_cval = p_to_tensor(self.pad_cval, (), dtype=images.dtype)
         images = tf.pad(images, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=pad_cval)
 
-        resized = tf.image.resize(
+        resized = tf_image_resize(
             images,
             self.last_shape[1:3]
         )
@@ -379,7 +385,7 @@ class CropAndPad(AbstractAugment):
         pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
         segmaps = tf.pad(segmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
 
-        resized = tf.image.resize(
+        resized = tf_image_resize(
             segmaps,
             self.last_shape[1:3]
         )
@@ -587,7 +593,7 @@ class ElasticWarp(AbstractAugment):
         else:
             raise ValueError('Unknown interpolation: %s' % self.interpolation)
 
-        self.displacement_field = tf.image.resize(self.displacement_field_small, self.last_shape[1:3], method=method)
+        self.displacement_field = tf_image_resize(self.displacement_field_small, self.last_shape[1:3], method=method)
         self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
 
     def _augment_images(self, images):
@@ -1051,7 +1057,7 @@ class RandomResize(AbstractAugment):
         else:
             shape = tf.shape(images)
 
-        return tf.reshape(tf.image.resize(tf.image.resize(images, size), self.last_shape[1:3]), shape)
+        return tf.reshape(tf_image_resize(tf_image_resize(images, size), self.last_shape[1:3]), shape)
 
 class LinearContrast(AbstractAugment):
 
