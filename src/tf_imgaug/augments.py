@@ -35,11 +35,13 @@ class AbstractAugment:
         return bboxes
     def _augment_segmaps(self, segmaps):
         return segmaps
+    def _augment_heatmaps(self, heatmaps):
+        return heatmaps
 
     def _init_rng(self):
         pass
 
-    def __call__(self, images, keypoints, bboxes, segmaps):
+    def __call__(self, images, keypoints, bboxes, segmaps, heatmaps):
         with tf.name_scope(type(self).__name__):
             self.last_shape = tf.shape(images)
             self.last_dtype = images.dtype
@@ -50,18 +52,19 @@ class AbstractAugment:
                     self._augment_images(e[0]),
                     self._augment_keypoints(e[1]),
                     self._augment_bboxes(e[2]),
-                    self._augment_segmaps(e[3])
+                    self._augment_segmaps(e[3]),
+                    self._augment_heatmaps(e[4])
                 )
 
             if self.separable:
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps, heatmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0], heatmaps_aug[:,0]
             else:
-                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = _aug((images, keypoints, bboxes, segmaps))
-                return images_aug, keypoints_aug, bboxes_aug, segmaps_aug
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug = _aug((images, keypoints, bboxes, segmaps, heatmaps))
+                return images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug
 
 class Noop(AbstractAugment):
 
@@ -111,6 +114,9 @@ class Translate(AbstractAugment):
 
     def _augment_segmaps(self, segmaps):
         return tfa.image.translate(segmaps, self.translations_xy, self.interpolation)
+
+    def _augment_heatmaps(self, heatmaps):
+        return tfa.image.translate(heatmaps, self.translations_xy, self.interpolation)
 
 
 class Rotate(AbstractAugment):
@@ -268,6 +274,9 @@ class Rotate(AbstractAugment):
 
     def _augment_segmaps(self, segmaps):
         return tfa.image.rotate(segmaps, self.angles, self.interpolation)
+    
+    def _augment_heatmaps(self, heatmaps):
+        return tfa.image.rotate(heatmaps, self.angles, self.interpolation)
 
 class CropAndPad(AbstractAugment):
 
@@ -397,6 +406,31 @@ class CropAndPad(AbstractAugment):
 
         return tf.image.convert_image_dtype(resized, dtype)
 
+    def _augment_heatmaps(self, heatmaps):
+        dtype = heatmaps.dtype
+        crop_and_pads = self.crop_and_pads
+        _heatmaps = heatmaps
+
+        crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
+        heatmaps = tf.slice(
+            heatmaps,
+            tf.concat([[0], -crops[:2], [0]], axis=0),
+            tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
+        )
+        pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
+        heatmaps = tf.pad(heatmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
+
+        resized = tf_image_resize(
+            heatmaps,
+            self.last_shape[1:3]
+        )
+        try:
+            resized = tf.reshape(resized, [_heatmaps.shape[0].value, tf.shape(_heatmaps)[1], tf.shape(_heatmaps)[2], _heatmaps.shape[3].value])
+        except:
+            pass
+
+        return tf.image.convert_image_dtype(resized, dtype)
+
 class Fliplr(AbstractAugment):
 
     def __init__(self, p=0.5):
@@ -470,6 +504,13 @@ class Fliplr(AbstractAugment):
             lambda: segmaps
         )
 
+    def _augment_heatmaps(self, heatmaps):
+        return tf.cond(
+            self.flip,
+            lambda: tf.image.flip_left_right(heatmaps),
+            lambda: heatmaps
+        )
+
 class Flipud(AbstractAugment):
 
     def __init__(self, p=0.5):
@@ -541,6 +582,13 @@ class Flipud(AbstractAugment):
             self.flip,
             lambda: tf.image.flip_up_down(segmaps),
             lambda: segmaps
+        )
+    
+    def _augment_heatmaps(self, heatmaps):
+        return tf.cond(
+            self.flip,
+            lambda: tf.image.flip_up_down(heatmaps),
+            lambda: heatmaps
         )
 
 class ElasticTransform(AbstractAugment):
@@ -707,6 +755,16 @@ class ElasticWarp(AbstractAugment):
         )
         return ret
 
+    def _augment_heatmaps(self, heatmaps):
+        if any([e is None for e in heatmaps.shape]):
+            raise ValueError('Heatmaps shape must be defined. Got %s' % str(heatmaps.shape))
+
+        ret = tfa.image.dense_image_warp(
+            heatmaps,
+            self.displacement_field
+        )
+        return ret
+
 
 class Sometimes(AbstractAugment):
 
@@ -730,7 +788,7 @@ class Sometimes(AbstractAugment):
         self.true_augment._set_formats(keypoints_format, bboxes_format)
         self.false_augment._set_formats(keypoints_format, bboxes_format)
 
-    def __call__(self, images, keypoints, bboxes, segmaps):
+    def __call__(self, images, keypoints, bboxes, segmaps, heatmaps):
 
         with tf.name_scope(type(self).__name__):
 
@@ -746,10 +804,10 @@ class Sometimes(AbstractAugment):
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps, heatmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0], heatmaps_aug[:, 0]
             else:
-                return _aug((images, keypoints, bboxes, segmaps))
+                return _aug((images, keypoints, bboxes, segmaps, heatmaps))
 
 class SomeOf(AbstractAugment):
 
@@ -784,7 +842,7 @@ class SomeOf(AbstractAugment):
         for aug in self.children_augments:
             aug._set_formats(keypoints_format, bboxes_format)
 
-    def __call__(self, images, keypoints, bboxes, segmaps):
+    def __call__(self, images, keypoints, bboxes, segmaps, heatmaps):
 
         with tf.name_scope(type(self).__name__):
             def _aug(e):
@@ -815,10 +873,10 @@ class SomeOf(AbstractAugment):
                 def wrapper(args):
                     return _aug(args)
 
-                images_aug, keypoints_aug, bboxes_aug, segmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps)]))
-                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0]
+                images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps, heatmaps)]))
+                return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0], heatmaps_aug[:, 0]
             else:
-                return _aug((images, keypoints, bboxes, segmaps))
+                return _aug((images, keypoints, bboxes, segmaps, heatmaps_aug))
 
 class OneOf(SomeOf):
 
