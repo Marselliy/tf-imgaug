@@ -1,4 +1,5 @@
 import tensorflow as tf
+import tensorflow_addons as tfa
 import math
 import random
 
@@ -86,7 +87,7 @@ class Translate(AbstractAugment):
         self.translations_yx = tf.stack([self.trans_y, self.trans_x], axis=-1)
 
     def _augment_images(self, images):
-        return tf.contrib.image.translate(images, self.translations_xy, self.interpolation)
+        return tfa.image.translate(images, self.translations_xy, self.interpolation)
 
     def _augment_keypoints(self, keypoints):
         if self.keypoints_format == 'xy':
@@ -109,7 +110,7 @@ class Translate(AbstractAugment):
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
     def _augment_segmaps(self, segmaps):
-        return tf.contrib.image.translate(segmaps, self.translations_xy, self.interpolation)
+        return tfa.image.translate(segmaps, self.translations_xy, self.interpolation)
 
 
 class Rotate(AbstractAugment):
@@ -123,7 +124,7 @@ class Rotate(AbstractAugment):
         self.angles = p_to_tensor(self.rotations, shape=self.last_shape[:1], seed=self._gen_seed()) * math.pi / 180
 
     def _augment_images(self, images):
-        return tf.contrib.image.rotate(images, self.angles, self.interpolation)
+        return tfa.image.rotate(images, self.angles, self.interpolation)
 
     def _augment_keypoints(self, keypoints):
         if self.keypoints_format == 'xy':
@@ -266,7 +267,7 @@ class Rotate(AbstractAugment):
             raise ValueError('Unsupported bboxes format: %s' % self.bboxes_format)
 
     def _augment_segmaps(self, segmaps):
-        return tf.contrib.image.rotate(segmaps, self.angles, self.interpolation)
+        return tfa.image.rotate(segmaps, self.angles, self.interpolation)
 
 class CropAndPad(AbstractAugment):
 
@@ -403,7 +404,7 @@ class Fliplr(AbstractAugment):
         self.p = p
 
     def _init_rng(self):
-        self.flip = tf.random_uniform((), seed=self._gen_seed()) < self.p
+        self.flip = tf.random.uniform((), seed=self._gen_seed()) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -476,7 +477,7 @@ class Flipud(AbstractAugment):
         self.p = p
 
     def _init_rng(self):
-        self.flip = tf.random_uniform((), seed=self._gen_seed()) < self.p
+        self.flip = tf.random.uniform((), seed=self._gen_seed()) < self.p
 
     def _augment_images(self, images):
         return tf.cond(
@@ -558,10 +559,10 @@ class ElasticTransform(AbstractAugment):
         self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
 
     def _augment_images(self, images):
-        if any([e.value is None for e in images.shape]):
+        if any([e is None for e in images.shape]):
             raise ValueError('Images shape must be defined. Got %s' % str(images.shape))
 
-        ret = tf.contrib.image.dense_image_warp(
+        ret = tfa.image.dense_image_warp(
             images,
             self.displacement_field
         )
@@ -597,10 +598,10 @@ class ElasticWarp(AbstractAugment):
         self.displacement_field = tf.expand_dims(self.displacement_field[0], axis=0)
 
     def _augment_images(self, images):
-        if any([e.value is None for e in images.shape]):
+        if any([e is None for e in images.shape]):
             raise ValueError('Images shape must be defined. Got %s' % str(images.shape))
 
-        ret = tf.contrib.image.dense_image_warp(
+        ret = tfa.image.dense_image_warp(
             images,
             self.displacement_field
         )
@@ -697,10 +698,10 @@ class ElasticWarp(AbstractAugment):
             raise ValueError('Unsupported bboxes format: %s' % self.keypoints_format)
 
     def _augment_segmaps(self, segmaps):
-        if any([e.value is None for e in segmaps.shape]):
+        if any([e is None for e in segmaps.shape]):
             raise ValueError('Segmaps shape must be defined. Got %s' % str(segmaps.shape))
 
-        ret = tf.contrib.image.dense_image_warp(
+        ret = tfa.image.dense_image_warp(
             segmaps,
             self.displacement_field
         )
@@ -721,7 +722,7 @@ class Sometimes(AbstractAugment):
         self.false_augment.separable = False
 
     def _init_rng(self):
-        self.flag = tf.random_uniform((), seed=self._gen_seed()) < self.p
+        self.flag = tf.random.uniform((), seed=self._gen_seed()) < self.p
 
     def _set_formats(self, keypoints_format, bboxes_format):
         self.keypoints_format = keypoints_format
@@ -788,7 +789,7 @@ class SomeOf(AbstractAugment):
         with tf.name_scope(type(self).__name__):
             def _aug(e):
                 self._init_rng()
-                num = tf.random_uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
+                num = tf.random.uniform((), minval=self.min_num, maxval=self.max_num + 1, dtype=tf.int32, seed=self._gen_seed())
                 order = tf.random.shuffle(tf.range(len(self.children_augments)), seed=self._gen_seed())[:num]
                 if not self.random_order:
                     order = tf.nn.top_k(order, k=num)[0][::-1]
@@ -799,7 +800,8 @@ class SomeOf(AbstractAugment):
                             return aug(*inp)
                         return __
 
-                    return {tf.equal(cur_id, i): _(prev, aug) for i, aug in enumerate(self.children_augments)}
+                    
+                    return [(tf.equal(cur_id, i), _(prev, aug)) for i, aug in enumerate(self.children_augments)]
 
                 def __aug(prev, cur_id):
                     pred_fn_pairs = _get_pred_fn_pairs(prev, cur_id)
@@ -850,7 +852,7 @@ class AbstractNoise(AbstractAugment):
                 map_shape = tf.concat([self.last_shape[:-1], [1]], axis=0)
             self.mask = coarse_map(p, map_shape, size_percent, seed=self._gen_seed(), soft=self.soft)
         else:
-            self.mask = tf.random_uniform(shape=noise_shape, seed=self._gen_seed()) < p
+            self.mask = tf.random.uniform(shape=noise_shape, seed=self._gen_seed()) < p
             self.mask = tf.cast(self.mask, tf.bool)
 
         self.noise = p_to_tensor(self.noise_range, noise_shape, dtype=self.last_dtype, seed=self._gen_seed())
@@ -926,7 +928,7 @@ class JpegCompression(AbstractAugment):
         else:
             min_quality, max_quality = self.quality, self.quality + 1
 
-        if all([not e.value is None for e in images.shape]):
+        if all([not e is None for e in images.shape]):
             shape = images.shape
         else:
             shape = tf.shape(images)
@@ -1052,7 +1054,7 @@ class RandomResize(AbstractAugment):
     def _augment_images(self, images):
         size = tf.cast(p_to_tensor(self.value, (), seed=self._gen_seed()) * tf.cast(self.last_shape[1:3], tf.float32), tf.int32)
 
-        if all([not e.value is None for e in images.shape]):
+        if all([not e is None for e in images.shape]):
             shape = images.shape
         else:
             shape = tf.shape(images)
@@ -1141,7 +1143,7 @@ class DenormalizeColors(AbstractAugment):
 
         pts_x = tf.concat([
             tf.zeros(shape=(tf.shape(x)[0], 1)),
-            tf.random_uniform(shape=(tf.shape(x)[0], points - 2), seed=self._gen_seed()),
+            tf.random.uniform(shape=(tf.shape(x)[0], points - 2), seed=self._gen_seed()),
             tf.ones(shape=(tf.shape(x)[0], 1)),
         ], axis=1)
         pts_y = pts_x + tf.random_normal(stddev=stddev, shape=(tf.shape(x)[0], points), seed=self._gen_seed())
@@ -1150,7 +1152,7 @@ class DenormalizeColors(AbstractAugment):
         train_points, train_values = train_points[..., :1], train_points[..., 1:]
         query_points = tf.expand_dims(x, axis=2)
 
-        query_values = tf.contrib.image.interpolate_spline(
+        query_values = tf.image.interpolate_spline(
             train_points=train_points,
             train_values=train_values,
             query_points=query_points,
