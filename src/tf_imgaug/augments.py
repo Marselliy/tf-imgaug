@@ -876,7 +876,7 @@ class SomeOf(AbstractAugment):
                 images_aug, keypoints_aug, bboxes_aug, segmaps_aug, heatmaps_aug = tf.map_fn(wrapper, tuple([tf.expand_dims(e, axis=1) for e in (images, keypoints, bboxes, segmaps, heatmaps)]))
                 return images_aug[:, 0], keypoints_aug[:, 0], bboxes_aug[:, 0], segmaps_aug[:, 0], heatmaps_aug[:, 0]
             else:
-                return _aug((images, keypoints, bboxes, segmaps, heatmaps_aug))
+                return _aug((images, keypoints, bboxes, segmaps, heatmaps))
 
 class OneOf(SomeOf):
 
