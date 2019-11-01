@@ -407,29 +407,36 @@ class CropAndPad(AbstractAugment):
         return tf.image.convert_image_dtype(resized, dtype)
 
     def _augment_heatmaps(self, heatmaps):
-        dtype = heatmaps.dtype
-        crop_and_pads = self.crop_and_pads
-        _heatmaps = heatmaps
+        def true(heatmaps):
+            dtype = heatmaps.dtype
+            crop_and_pads = self.crop_and_pads
+            _heatmaps = heatmaps
 
-        crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
-        heatmaps = tf.slice(
-            heatmaps,
-            tf.concat([[0], -crops[:2], [0]], axis=0),
-            tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
+            crops = tf.clip_by_value(crop_and_pads, tf.minimum(0, tf.reduce_min(crop_and_pads)), 0)
+            heatmaps = tf.slice(
+                heatmaps,
+                tf.concat([[0], -crops[:2], [0]], axis=0),
+                tf.concat([[-1], self.last_shape[1:3] + crops[:2] + crops[2:], [-1]], axis=0)
+            )
+            pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
+            heatmaps = tf.pad(heatmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
+
+            resized = tf_image_resize(
+                heatmaps,
+                self.last_shape[1:3]
+            )
+            try:
+                resized = tf.reshape(resized, [_heatmaps.shape[0].value, tf.shape(_heatmaps)[1], tf.shape(_heatmaps)[2], _heatmaps.shape[3].value])
+            except:
+                pass
+
+            return tf.image.convert_image_dtype(resized, dtype)
+
+        return tf.cond(
+            tf.shape(heatmaps)[-1] > 0,
+            true,
+            lambda: heatmaps
         )
-        pads = tf.clip_by_value(crop_and_pads, 0, tf.maximum(0, tf.reduce_max(crop_and_pads)))
-        heatmaps = tf.pad(heatmaps, tf.stack([[0, 0], pads[::2], pads[1::2], [0, 0]], axis=0), mode=self.mode, constant_values=0)
-
-        resized = tf_image_resize(
-            heatmaps,
-            self.last_shape[1:3]
-        )
-        try:
-            resized = tf.reshape(resized, [_heatmaps.shape[0].value, tf.shape(_heatmaps)[1], tf.shape(_heatmaps)[2], _heatmaps.shape[3].value])
-        except:
-            pass
-
-        return tf.image.convert_image_dtype(resized, dtype)
 
 class Fliplr(AbstractAugment):
 
@@ -499,14 +506,14 @@ class Fliplr(AbstractAugment):
 
     def _augment_segmaps(self, segmaps):
         return tf.cond(
-            self.flip,
+            self.flip and (tf.shape(segmaps)[-1] > 0),
             lambda: tf.image.flip_left_right(segmaps),
             lambda: segmaps
         )
 
     def _augment_heatmaps(self, heatmaps):
         return tf.cond(
-            self.flip,
+            self.flip and (tf.shape(heatmaps)[-1] > 0),
             lambda: tf.image.flip_left_right(heatmaps),
             lambda: heatmaps
         )
@@ -579,14 +586,14 @@ class Flipud(AbstractAugment):
 
     def _augment_segmaps(self, segmaps):
         return tf.cond(
-            self.flip,
+            self.flip and (tf.shape(segmaps)[-1] > 0),
             lambda: tf.image.flip_up_down(segmaps),
             lambda: segmaps
         )
     
     def _augment_heatmaps(self, heatmaps):
         return tf.cond(
-            self.flip,
+            self.flip and (tf.shape(heatmaps)[-1] > 0),
             lambda: tf.image.flip_up_down(heatmaps),
             lambda: heatmaps
         )
