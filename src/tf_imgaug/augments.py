@@ -319,7 +319,7 @@ class CropAndPad(AbstractAugment):
             self.last_shape[1:3]
         )
         try:
-            resized = tf.reshape(resized, [_images.shape[0].value, tf.shape(_images)[1], tf.shape(_images)[2], _images.shape[3].value])
+            resized = tf.reshape(resized, tf.shape(_images))
         except:
             pass
 
@@ -401,7 +401,7 @@ class CropAndPad(AbstractAugment):
                 self.last_shape[1:3]
             )
             try:
-                resized = tf.reshape(resized, [_segmaps.shape[0].value, tf.shape(_segmaps)[1], tf.shape(_segmaps)[2], _segmaps.shape[3].value])
+                resized = tf.reshape(resized, tf.shape(_segmaps))
             except:
                 pass
 
@@ -409,7 +409,7 @@ class CropAndPad(AbstractAugment):
 
         return tf.cond(
             tf.shape(segmaps)[-1] > 0,
-            true,
+            lambda: true(segmaps),
             lambda: segmaps
         )
 
@@ -433,7 +433,7 @@ class CropAndPad(AbstractAugment):
                 self.last_shape[1:3]
             )
             try:
-                resized = tf.reshape(resized, [_heatmaps.shape[0].value, tf.shape(_heatmaps)[1], tf.shape(_heatmaps)[2], _heatmaps.shape[3].value])
+                resized = tf.reshape(resized, tf.shape(_heatmaps))
             except:
                 pass
 
@@ -441,7 +441,7 @@ class CropAndPad(AbstractAugment):
 
         return tf.cond(
             tf.shape(heatmaps)[-1] > 0,
-            true,
+            lambda: true(heatmaps),
             lambda: heatmaps
         )
 
@@ -519,11 +519,15 @@ class Fliplr(AbstractAugment):
         )
 
     def _augment_heatmaps(self, heatmaps):
-        return tf.cond(
-            self.flip and (tf.shape(heatmaps)[-1] > 0),
-            lambda: tf.image.flip_left_right(heatmaps),
-            lambda: heatmaps
-        )
+        if heatmaps.shape[-1] is None:
+            return tf.cond(
+                tf.logical_and(self.flip, tf.greater(tf.shape(heatmaps)[-1], 0)),
+                lambda: tf.image.flip_left_right(heatmaps),
+                lambda: heatmaps
+            )
+        if heatmaps.shape[-1] == 0:
+            return heatmaps
+        return tf.image.flip_left_right(heatmaps)
 
 class Flipud(AbstractAugment):
 
@@ -599,11 +603,15 @@ class Flipud(AbstractAugment):
         )
     
     def _augment_heatmaps(self, heatmaps):
-        return tf.cond(
-            self.flip and (tf.shape(heatmaps)[-1] > 0),
-            lambda: tf.image.flip_up_down(heatmaps),
-            lambda: heatmaps
-        )
+        if heatmaps.shape[-1] is None:
+            return tf.cond(
+                tf.logical_and(self.flip, tf.greater(tf.shape(heatmaps)[-1], 0)),
+                lambda: tf.image.flip_up_down(heatmaps),
+                lambda: heatmaps
+            )
+        if heatmaps.shape[-1] == 0:
+            return heatmaps
+        return tf.image.flip_up_down(heatmaps)
 
 class ElasticTransform(AbstractAugment):
 
