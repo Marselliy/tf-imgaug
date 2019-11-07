@@ -51,10 +51,11 @@ class Sequential:
                 aug._set_seed(self.random.randint(0, 2 ** 32))
                 res = aug(*res)
 
-            segmaps = res[3]
-            segmaps = tf.concat([tf.ones_like(segmaps[..., :1]) * 0e-2, segmaps], axis=-1)
-            segmaps = tf.one_hot(tf.argmax(segmaps, axis=-1), tf.shape(segmaps)[-1])[..., 1:]
-            res = res[:3] + (segmaps,) + (res[4],)
+            if not segmaps_none:
+                segmaps = res[3]
+                segmaps = tf.concat([tf.ones_like(segmaps[..., :1]) * 0e-2, segmaps], axis=-1)
+                segmaps = tf.one_hot(tf.argmax(segmaps, axis=-1), tf.shape(segmaps)[-1])[..., 1:]
+                res = res[:3] + (segmaps,) + (res[4],)
 
             if images.dtype != tf.float32:
                 res = (tf.image.convert_image_dtype(res[0], images.dtype),) + res[1:]
