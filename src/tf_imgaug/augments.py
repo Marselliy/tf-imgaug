@@ -790,8 +790,8 @@ class ElasticWarp(AbstractAugment):
 
 class Sometimes(AbstractAugment):
 
-    def __init__(self, p, true_augment, false_augment=Noop()):
-        super(Sometimes, self).__init__()
+    def __init__(self, p, true_augment, false_augment=Noop(), separable=True):
+        super(Sometimes, self).__init__(separable=separable)
         self.p = p
         self.true_augment = true_augment
         self.false_augment = false_augment
