@@ -457,7 +457,7 @@ class Fliplr(AbstractAugment):
     def _augment_images(self, images):
         return tf.cond(
             self.flip,
-            lambda: tf.image.flip_left_right(images),
+            lambda: images[:, :, ::-1],
             lambda: images
         )
 
@@ -514,7 +514,7 @@ class Fliplr(AbstractAugment):
     def _augment_segmaps(self, segmaps):
         return tf.cond(
             self.flip and (tf.shape(segmaps)[-1] > 0),
-            lambda: tf.image.flip_left_right(segmaps),
+            lambda: segmaps[:, :, ::-1],
             lambda: segmaps
         )
 
@@ -522,7 +522,7 @@ class Fliplr(AbstractAugment):
         if heatmaps.shape[-1] is None:
             return tf.cond(
                 tf.logical_and(self.flip, tf.greater(tf.shape(heatmaps)[-1], 0)),
-                lambda: tf.image.flip_left_right(heatmaps),
+                lambda: heatmaps[:, :, ::-1],
                 lambda: heatmaps
             )
         if heatmaps.shape[-1] == 0:
@@ -541,7 +541,7 @@ class Flipud(AbstractAugment):
     def _augment_images(self, images):
         return tf.cond(
             self.flip,
-            lambda: tf.image.flip_up_down(images),
+            lambda: images[:, ::-1],
             lambda: images
         )
 
@@ -598,7 +598,7 @@ class Flipud(AbstractAugment):
     def _augment_segmaps(self, segmaps):
         return tf.cond(
             self.flip and (tf.shape(segmaps)[-1] > 0),
-            lambda: tf.image.flip_up_down(segmaps),
+            lambda: segmaps[:, ::-1],
             lambda: segmaps
         )
     
@@ -606,7 +606,7 @@ class Flipud(AbstractAugment):
         if heatmaps.shape[-1] is None:
             return tf.cond(
                 tf.logical_and(self.flip, tf.greater(tf.shape(heatmaps)[-1], 0)),
-                lambda: tf.image.flip_up_down(heatmaps),
+                lambda: heatmaps[:, ::-1],
                 lambda: heatmaps
             )
         if heatmaps.shape[-1] == 0:
